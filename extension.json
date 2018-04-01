@@ -1,9 +1,0 @@
-{
-  "name": "EasyTests",
-  "author": "Katherine Fomenko",
-  "description": "This extension is an example and performs no discernible function",
-  "version": "0.0.1",
-  "license-name": "GNU",
-  "type": "validextensionclass",
-  "manifest_version": 1
-}

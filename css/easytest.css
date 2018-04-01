@@ -1,0 +1,128 @@
+.easytests-intro-finish .begin-only {
+    display: none;
+}
+
+.easytests-form th {
+    text-align: left;
+    width: 1%;
+    white-space: nowrap;
+    font-weight: normal;
+}
+
+.easytests-toc {
+    border-collapse: separate;
+    empty-cells: hide;
+}
+
+.easytests-toc td {
+    border: 1px solid gray;
+    padding: 4px 8px;
+    text-align: center;
+    width: 1.5em;
+}
+
+.easytests-count {
+    font-weight: bold;
+}
+
+.easytests-result th {
+    background-color: #e0e0e0;
+    padding: 4px;
+}
+
+.easytests-result td {
+    text-align: center;
+}
+
+.easytests-noitem {
+    font-weight: bold;
+    background-color: #f0f0f0;
+}
+
+.easytests-questionnaire, .easytests-checklist {
+    border-collapse: collapse !important;
+    empty-cells: show;
+}
+
+.easytests-questionnaire {
+    width: 50%;
+}
+
+.easytests-checklist {
+    width: 80%;
+}
+
+.easytests-questionnaire td, .easytests-questionnaire th, .easytests-checklist td, .easytests-checklist th {
+    border: 1px solid gray;
+    text-align: center;
+}
+
+.easytests-questionnaire th {
+    width: 30%;
+}
+
+.easytests-checklist th {
+    width: 25%;
+}
+
+.easytests-questionnaire .easytests-tn, .easytests-checklist .easytests-tn {
+    width: 10%;
+}
+
+.easytests-congrats {
+    text-align: center;
+}
+
+.easytests-review {
+    border-collapse: collapse;
+}
+
+.easytests-review td, .easytests-review th {
+    border: 1px solid black;
+    padding: 2px;
+}
+
+.easytests-review th {
+    background-color: #D0D0D0;
+    text-align: left;
+    white-space: nowrap;
+}
+
+.easytests-select-tickets {
+    margin: 12px 0;
+}
+
+.easytests-select-tickets input {
+    margin: 1px 0;
+}
+
+.easytests-dead {
+    color: red;
+}
+
+.easytests-fail {
+    background-color: #ffe0e0;
+}
+
+.easytests-pass {
+    background-color: #e0ffe0;
+}
+
+.easytests-fail-bd {
+    background-color: #ffe0e0;
+    font-weight: bold;
+}
+
+.easytests-incoming {
+    font-weight: bold;
+}
+
+@media print {
+    .headline, #siteSub, .printfooter, #footer {
+        display: none;
+    }
+
+    .easytests-questionnaire td, .easytests-questionnaire th, .easytests-checklist td, .easytests-checklist th {
+        white-space: nowrap;
+    }
+}
