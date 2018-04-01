@@ -1085,7 +1085,6 @@ EOT;
             if (!$row || !$row['cs_correct']) {
                 $qn_text = trim(strip_tags($q['qn_text']));
                 $ch_correct = trim(strip_tags($q['correct_choices'][0]['ch_text']));
-                /* TODO (?) format this as HTML and send HTML emails */
                 $lab = trim(strip_tags($q['qn_label']));
                 if ($lab)
                     $lab .= ' | ';
@@ -1106,7 +1105,6 @@ ${ch_user}≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈�
 EOT;
             }
         }
-        /* TODO (?) format this as HTML and send HTML emails */
         $values = array(
             array('quiz', "$test[test_name] /* Id: $test[test_id] */"),
             array('variant', $test['variant_hash_crc32']),
@@ -1137,7 +1135,6 @@ EOT;
     static function sendMail($ticket, $test, $testresult)
     {
         global $egEasyTestsAdmins, $wgEmergencyContact;
-        /* TODO (?) send mail without correct answers to user */
         $text = self::buildMailText($ticket, $test, $testresult);
         $sender = new MailAddress($wgEmergencyContact);
         foreach ($egEasyTestsAdmins as $admin) {
