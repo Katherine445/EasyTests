@@ -632,6 +632,7 @@ EOT;
         if (!$userid)
             $userid = NULL;
         $dbw = wfGetDB(DB_MASTER);
+        global $wgRequest;
         $ticket = array(
             'tk_id' => $dbw->nextSequenceValue('et_ticket_tk_id_seq'),
             'tk_key' => $key,
@@ -640,7 +641,7 @@ EOT;
             'tk_displayname' => NULL,
             'tk_user_id' => $userid,
             'tk_user_text' => $wgUser->getName(),
-            'tk_user_ip' => wfGetIP(),
+            'tk_user_ip' => $wgRequest->getIP(),
             'tk_test_id' => $test['test_id'],
             'tk_variant' => $test['variant_hash'],
         );
@@ -692,7 +693,7 @@ EOT;
         elseif ($ticket['tk_end_time'])
             die('BUG: ticket is already answered');
         elseif (!$ticket['tk_start_time']) {
-            global $wgUser;
+            global $wgUser, $wgRequest;
             $userid = $wgUser->getId();
             if (!$userid)
                 $userid = NULL;
@@ -700,7 +701,7 @@ EOT;
                 'tk_start_time' => wfTimestampNow(TS_MW),
                 'tk_user_id' => $userid,
                 'tk_user_text' => $wgUser->getName(),
-                'tk_user_ip' => wfGetIP(),
+                'tk_user_ip' => $wgRequest->getIP(),
             );
             $ticket = array_merge($ticket, $update);
             $dbw = wfGetDB(DB_MASTER);
@@ -1020,6 +1021,7 @@ EOT;
         if ($updated) {
             /* Update ticket */
             $userid = $wgUser->getId();
+            global $wgRequest;
             if (!$userid)
                 $userid = NULL;
             $update = array(
@@ -1027,7 +1029,7 @@ EOT;
                 'tk_displayname' => $args['prompt'],
                 'tk_user_id' => $userid,
                 'tk_user_text' => $wgUser->getName(),
-                'tk_user_ip' => wfGetIP(),
+                'tk_user_ip' => $wgRequest->getIP(),
                 /* Testing result to be shown in the table.
                    Nothing relies on these values. */
                 'tk_score' => $testresult['score'],
@@ -1183,13 +1185,13 @@ EOT;
     /* Draws a QR code with ticket check link */
     function qrCode($args)
     {
-        global $wgTitle, $IP;
+        global $wgTitle, $IP, $wgOut;
         $ticket = self::loadTicket($args['ticket_id'], $args['ticket_key']);
         if (!$ticket) {
             $wgOut->showErrorPage('easytests-check-no-ticket-title', 'easytests-check-no-ticket-text', array($name, $href));
             return;
         }
-        require_once(dirname(__FILE__) . '/phpqrcode.php');
+        require_once(dirname(__FILE__) . '/includes/phpqrcode.php');
         if (is_writable("$IP/images")) {
             global $QR_CACHE_DIR, $QR_CACHEABLE;
             $dir = "$IP/images/generated/qrcode/";
