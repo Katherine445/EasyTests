@@ -259,7 +259,6 @@ $messages['uk'] = array(
     'easytests-parse-question-match' => '(?:Питання\s*відповідність|Matches\s*question)[:\s]*',
     'easytests-parse-choice' => 'Відповідь|(?:Choice|Answer)(?!s)',
     'easytests-parse-choices' => 'Відповіді|Варіанти\s*відповідей|Choices|Answers',
-//    'easytests-parse-choices-matches'=> 'Варіанти',
     'easytests-parse-correct-matches' => '(?:Правильні|Правильний)\s*(відповідності|порядок)[:\s]*',
     'easytests-parse-correct' => '(?:Правильна\s*відповідь|(?:Correct|Right)\s*(?:Choice|Answer)(?!s))[:\s]*',
     'easytests-parse-corrects' => 'Правильні\s*відповіді|Правильні\s*варіанти\s*відповідей|(?:Correct|Right)\s*(?:Choices|Answers)',

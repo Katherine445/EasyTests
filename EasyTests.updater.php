@@ -57,7 +57,6 @@ class EasyTestsUpdater
         'test_mode' => 'TEST',
         'test_shuffle_questions' => 0,
         'test_shuffle_choices' => 0,
-//        'test_secret' => 0,
         'test_limit_questions' => 0,
         'test_ok_percent' => 80,
         'test_autofilter_min_tries' => 0,
