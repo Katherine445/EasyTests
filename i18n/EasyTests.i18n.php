@@ -137,7 +137,7 @@ Then click "Select results" again.',
 );
 
 $messages['uk'] = array(
-    'easytests' => 'Вікі-Тестування',
+    'easytests' => 'CSPUWikiTests',
     'easytests-actions' => '<p><a href="$2">Пройти тест «$1»</a> &nbsp; | &nbsp; <a href="$3">Версія для друку</a></p>',
     'easytests-actions-secret' => '<p><a href="$2">Отримати одноразове посилання на тестування</a> &nbsp; | &nbsp; <a href="$3">Версія для друку</a></p>',
     'easytests-show-parselog' => '[+] Показати лог розбору сторінки тесту',

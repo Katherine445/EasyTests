@@ -6,7 +6,7 @@ $options = array('quick');
 require_once('maintenance/commandLine.inc');
 @include_once('maintenance/counter.php');
 
-if (!defined('NS_QUIZ'))
+if (!defined('NS_EATEST'))
     die("EasyTests is disabled on this wiki.");
 
 print "Going to reparse all articles inside Quiz namespace.
@@ -27,7 +27,7 @@ $wgUser = User::newFromName('WikiSysop');
 
 $titles = array();
 $dbw = wfGetDB(DB_MASTER);
-$result = $dbw->select('page', 'page_id', array('page_namespace' => NS_QUIZ, "INSTR(page_title,'/')=0"));
+$result = $dbw->select('page', 'page_id', array('page_namespace' => NS_EATEST, "INSTR(page_title,'/')=0"));
 while ($row = $dbw->fetchRow($result))
     $titles[] = Title::newFromId($row[0]);
 $dbw->freeResult($result);

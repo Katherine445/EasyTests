@@ -159,7 +159,7 @@ class EasyTestsPage extends SpecialPage
             if (is_object($name))
                 $title = $name;
             else
-                $title = Title::newFromText($name, NS_QUIZ);
+                $title = Title::newFromText($name, NS_EATEST);
             if ($title && $title->exists() && $title->userCan('read'))
                 return true;
         }

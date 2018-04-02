@@ -75,28 +75,28 @@ class EasyTests
     // Returns true if Title $t corresponds to an article which defines a quiz
     static function isQuiz(Title $t)
     {
-        return $t && $t->getNamespace() == NS_QUIZ && strpos($t->getText(), '/') === false;
+        return $t && $t->getNamespace() == NS_EATEST && strpos($t->getText(), '/') === false;
     }
 
     // Setup MediaWiki namespace for Quizzer
     static function setupNamespace($index)
     {
         $index = $index & ~1;
-        define('NS_QUIZ', $index);
-        define('NS_QUIZ_TALK', $index + 1);
+        define('NS_EATEST', $index);
+        define('NS_EATEST_TALK', $index + 1);
     }
 
     // Initialize extension
     static function init()
     {
-        if (!defined('NS_QUIZ'))
+        if (!defined('NS_EATEST'))
             die("Please add the following line:\nEasyTests::setupNamespace(XXX);\nto your LocalSettings.php, where XXX is an available integer index for Quiz namespace");
         global $wgExtraNamespaces, $wgCanonicalNamespaceNames, $wgNamespaceAliases, $wgParser;
         global $wgVersion, $wgHooks;
-        $wgExtraNamespaces[NS_QUIZ] = $wgCanonicalNamespaceNames[NS_QUIZ] = 'Quiz';
-        $wgExtraNamespaces[NS_QUIZ_TALK] = $wgCanonicalNamespaceNames[NS_QUIZ_TALK] = 'Quiz_talk';
-        $wgNamespaceAliases['Quiz'] = NS_QUIZ;
-        $wgNamespaceAliases['Quiz_talk'] = NS_QUIZ_TALK;
+        $wgExtraNamespaces[NS_EATEST] = $wgCanonicalNamespaceNames[NS_EATEST] = 'Quiz';
+        $wgExtraNamespaces[NS_EATEST_TALK] = $wgCanonicalNamespaceNames[NS_EATEST_TALK] = 'Quiz_talk';
+        $wgNamespaceAliases['Quiz'] = NS_EATEST;
+        $wgNamespaceAliases['Quiz_talk'] = NS_EATEST_TALK;
         if ($wgVersion < '1.14')
             $wgHooks['NewRevisionFromEditComplete'][] = 'EasyTests::NewRevisionFromEditComplete';
         else
@@ -123,7 +123,7 @@ class EasyTests
         global $wgVersion;
         if (isset(self::$updated[$article->getId()]))
             return true;
-        if ($article->getTitle()->getNamespace() == NS_QUIZ) {
+        if ($article->getTitle()->getNamespace() == NS_EATEST) {
             if (self::isQuiz($article->getTitle())) {
                 // Reload new revision id
                 $article = new Article($article->getTitle());
@@ -173,7 +173,7 @@ class EasyTests
     // Hook for displaying statistics near question titles
     static function DoEditSectionLink($skin, $nt, $section, $tooltip, &$result)
     {
-        if (!self::$disableQuestionInfo && $nt->getNamespace() == NS_QUIZ)
+        if (!self::$disableQuestionInfo && $nt->getNamespace() == NS_EATEST)
             EasyTestsPage::quizQuestionInfo($nt, $section, $result);
         return true;
     }
@@ -197,14 +197,14 @@ class EasyTests
                 array('page', 'templatelinks'),
                 array('page_namespace', 'page_title', 'page_id', 'page_len', 'page_is_redirect'),
                 $where + array(
-                    'page_namespace' => NS_QUIZ,
+                    'page_namespace' => NS_EATEST,
                     'page_is_redirect' => 0,
                     'tl_from=page_id',
                 ),
                 __METHOD__
             );
 
-            $where['tl_namespace'] = NS_QUIZ;
+            $where['tl_namespace'] = NS_EATEST;
             $where['tl_title'] = array();
 
             if (!$dbr->numRows($res))
@@ -212,8 +212,8 @@ class EasyTests
 
             foreach ($res as $row) {
                 if ($titleObj = Title::makeTitle($row->page_namespace, $row->page_title)) {
-                    if ($titleObj->getNamespace() == NS_QUIZ && !$id_seen[$row->page_id]) {
-                        // Make closure only inside NS_QUIZ
+                    if ($titleObj->getNamespace() == NS_EATEST && !$id_seen[$row->page_id]) {
+                        // Make closure only inside NS_EATEST
                         $where['tl_title'][] = $titleObj->getDBkey();
                         $id_seen[$row->page_id] = 1;
                     }
