@@ -35,10 +35,10 @@ class EasyTestsPage extends SpecialPage
             return;
         $s = Title::newFromText('Special:EasyTests');
         $actions = array(
-            'try' => $s->getFullUrl(array('id' => $quiz['test_id']) + ($quiz['test_secret'] ? array('mode' => 'getticket') : array())),
+            'try' => $s->getFullUrl(array('id' => $quiz['test_id']) + (array())),
             'print' => $s->getFullUrl(array('id' => $quiz['test_id'], 'mode' => 'print')),
         );
-        $wgOut->addHTML(wfMsg(($quiz['test_secret'] ? 'easytests-actions-secret' : 'easytests-actions'), $quiz['test_name'], $actions['try'], $actions['print']));
+        $wgOut->addHTML(wfMsg('easytests-actions', $quiz['test_name'], $actions['try'], $actions['print']));
         /* Display log */
         $log = $quiz['test_log'];
         if ($log) {
@@ -247,7 +247,7 @@ class EasyTestsPage extends SpecialPage
 
         /* Load random or specific test variant */
         $test = self::loadTest($id, $variant);
-        if (!$test || $test['test_secret'] && !$ticket &&
+        if (!$test && !$ticket &&
             !self::isAdminForTest($test['test_id']) /*&& !$wgUser->isAllowed('secretquiz')*/
         ) {
             $wgOut->showErrorPage('easytests-test-not-found-title', 'easytests-test-not-found-text');
@@ -720,24 +720,26 @@ EOT;
         $mandatory = '<span style="color:red" title="' . wfMsg('easytests-prompt-needed') . '">*</span>';
         if ($formdef) {
             foreach ($formdef as $i => $field) {
-                if ($field['type'] == 'name') {
-                    if ($found_name) {
-                        $field['type'] = 'text';
+                if(isset($field['type'])) {
+                    if ($field['type'] == 'name') {
+                        if ($found_name) {
+                            $field['type'] = 'text';
+                        }
+                        $found_name = true;
                     }
-                    $found_name = true;
-                }
-                if ($field['type'] == 'name' || $field['type'] == 'text') {
-                    $nm = $field['type'] == 'name' ? 'prompt' : "detail_$i";
-                    $form .= '<tr><th><label for="' . $nm . '">' . trim($field['name']) . ($field['mandatory'] ? $mandatory : '') .
-                        ':</label></th><td><input type="text" name="' . $nm . '" id="' . $nm . '" size="40" value="' . htmlspecialchars(@$args[$nm]) . '" /></td></tr>';
-                } elseif ($field['type'] == 'html') {
-                    $form .= '<tr><td colspan="2">' . $field['name'] . '</td></tr>';
-                } elseif ($field['type'] == 'checkbox') {
-                    $form .= '<tr><td colspan="2"><input type="checkbox" name="detail_' . $i . '" id="detail_' . $i .
-                        '" value="' . htmlspecialchars($field['value']) . '"' . (@$args["detail_$i"] ? ' checked="checked"' : '') . ' /> ' .
-                        '<label for="detail_' . $i . '">' . ($field['mandatory'] && empty($field['multiple']) ? $mandatory . ' ' : '') .
-                        ($field['value'] == '1' ? $field['name'] : $field['value']) .
-                        '</label></td></tr>';
+                    if ($field['type'] == 'name' || $field['type'] == 'text') {
+                        $nm = $field['type'] == 'name' ? 'prompt' : "detail_$i";
+                        $form .= '<tr><th><label for="' . $nm . '">' . trim($field['name']) . ($field['mandatory'] ? $mandatory : '') .
+                            ':</label></th><td><input type="text" name="' . $nm . '" id="' . $nm . '" size="40" value="' . htmlspecialchars(@$args[$nm]) . '" /></td></tr>';
+                    } elseif ($field['type'] == 'html') {
+                        $form .= '<tr><td colspan="2">' . $field['name'] . '</td></tr>';
+                    } elseif ($field['type'] == 'checkbox') {
+                        $form .= '<tr><td colspan="2"><input type="checkbox" name="detail_' . $i . '" id="detail_' . $i .
+                            '" value="' . htmlspecialchars($field['value']) . '"' . (@$args["detail_$i"] ? ' checked="checked"' : '') . ' /> ' .
+                            '<label for="detail_' . $i . '">' . ($field['mandatory'] && empty($field['multiple']) ? $mandatory . ' ' : '') .
+                            ($field['value'] == '1' ? $field['name'] : $field['value']) .
+                            '</label></td></tr>';
+                    }
                 }
             }
         }
@@ -1235,7 +1237,7 @@ EOT;
             $html .= wfMsg('easytests-variant-already-seen') . ' ';
         }
         $href = $wgTitle->getFullUrl(array('id' => $test['test_id']));
-        if (!$test['test_secret'] || self::isAdminForTest($test['test_id']) /*|| $wgUser->isAllowed('secretquiz')*/) {
+        if (self::isAdminForTest($test['test_id'])) {
             $html .= wfMsg('easytests-try-another', $href);
         }
 
