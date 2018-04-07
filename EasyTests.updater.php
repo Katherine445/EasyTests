@@ -1,19 +1,6 @@
 <?php
 
 /**
- * Quizzer extension for MediaWiki
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * @author Stas Fomin <stas-fomin@yandex.ru>
- * @author Vitaliy Filippov <vitalif@mail.ru>
- * @license http://www.gnu.org/copyleft/gpl.html GNU General Public License 2.0 or later
- */
-
-/**
  * This class is responsible for parsing quiz articles and writing parsed quizzes into DB.
  * It is done using a recursive DOM parser and DOMParseUtils class.
  */
@@ -92,18 +79,6 @@ class EasyTestsUpdater
         return $html;
     }
 
-    /**
-     * Build regular expressions to match headings
-     *
-     * Regular expressions for parsing headings and list items
-     * are built from parts taken from localisation messages
-     * for $egEasyTestsContLang or wiki content language.
-     * These messages must represent regexps that don't capture anything
-     * in (). I.e., always use (?:...) instead of (...) inside them.
-     * This is because they are united and N'th captured field tells
-     * EasyTests that N'th regexp is captured. Using this,
-     * field names are determined.
-     */
     static function getRegexps()
     {
         global $egEasyTestsContLang;
@@ -190,11 +165,9 @@ class EasyTestsUpdater
     const ST_PARAM_DD = 2;  /* Waiting for <dd> with quiz field value */
     const ST_CHOICE = 3;    /* Inside single choice section */
     const ST_CHOICES = 4;   /* Inside multiple choices section */
-    const ST_FORM = 5;      /* Inside form section */
-    const ST_FORM_DD = 6;   /* Waiting for <dd> with form field name(s) */
 
     /* parseQuiz() using a state machine :-) */
-    static function parseQuiz2($html)
+    static function parseQuiz($html)
     {
         self::getRegexps();
         $log = '';
@@ -209,73 +182,148 @@ class EasyTestsUpdater
         $quiz = self::$test_default_values; /* Quiz field => value */
         $field = '';            /* Current parsed field */
         $checkbox_name = '';    /* Checkbox field name */
-        $correct = 0;           /* Is current choice(s) section for correct choices */
+        $correct = 0; /* Is current choice(s) section for correct choices */
+        $end = true;
         /* Loop through all elements: */
         while ($stack) {
-            list($p, $i, $h, $l) = $stack[count($stack) - 1];
-            if ($i >= $p->childNodes->length) {
+            list($nodeDOMElement, $i, $h, $l) = $stack[count($stack) - 1];
+            if ($i >= $nodeDOMElement->childNodes->length) {
                 array_pop($stack);
                 if ($append && !$h) {
                     /* Remove children from the end of $append[0]
                        and append element itself */
-                    $append[0] = substr($append[0], 0, $l) . $document->saveXML($p);
+                    $append[0] = substr($append[0], 0, $l) . $document->saveXML($nodeDOMElement);
                 } elseif ($h && $stack) {
                     /* Propagate "Already processed" value */
                     $stack[count($stack) - 1][2] = true;
                 }
                 continue;
             }
+            //count child nodes
             $stack[count($stack) - 1][1]++;
-            $e = $p->childNodes->item($i);
-            if ($e->nodeType == XML_ELEMENT_NODE) {
-                $fall = false;
-                if (preg_match('/^h(\d)$/is', $e->nodeName, $m)) {
-                    $level = $m[1];
-                    $log_el = str_repeat('=', $level);
-                    /* Remove editsection links */
-                    $editsection = NULL;
-                    if ($e->childNodes->length) {
-                        foreach ($e->childNodes as $span) {
-                            if ($span->nodeName == 'span' && ($span->getAttribute('class') == 'editsection' ||
-                                    $span->getAttribute('class') == 'mw-editsection')
-                            ) {
-                                $e->removeChild($span);
-                                $editsection = $document->saveXML($span);
+            $element = $nodeDOMElement->childNodes->item($i);
+            if ($element->nodeType == XML_ELEMENT_NODE) {
+                // check if current element
+                if($element->nodeName !== 'body') {
+                    $end = false;
+                    if (preg_match('/^h(\d)$/is', $element->nodeName, $m)) {
+                        $level = $m[1];
+                        $log_el = str_repeat('=', $level);
+                        /* Remove editsection links */
+                        $editsection = NULL;
+                        if ($element->childNodes->length) {
+                            foreach ($element->childNodes as $span) {
+                                if ($span->nodeName == 'span' && ($span->getAttribute('class') == 'editsection' ||
+                                        $span->getAttribute('class') == 'mw-editsection')
+                                ) {
+                                    $element->removeChild($span);
+                                    $editsection = $document->saveXML($span);
+                                }
                             }
                         }
+                        $log_el = $log_el . self::textlog($element) . $log_el;
+                        /* Match question/parameter section title */
+                        $chk = DOMParseUtils::checkNode($element, self::$regexp_test, true);
+                        if ($chk) {
+                            if ($chk[1][1][0]) {
+                                if ($q)
+                                    self::checkLastQuestion($q, $log);
+                                /* Question section - found */
+                                $log .= "[INFO] Begin question section: $log_el\n";
+                                $st = self::ST_QUESTION;
+                                if (preg_match('/\?([^"\'\s]*)/s', $editsection, $m)) {
+                                    /* Extract page title and section number from editsection link */
+                                    $es = array();
+                                    parse_str(htmlspecialchars_decode($m[1]), $es);
+                                    preg_match('/\d+/', $es['section'], $m);
+                                    $anch = $es['title'] . '|' . $m[0];
+                                } else
+                                    $anch = NULL;
+                                $q[] = array(
+                                    'qn_label' => DOMParseUtils::saveChildren($chk[0], true),
+                                    'qn_anchor' => $anch,
+                                    'qn_editsection' => $editsection,
+                                );
+                                $append = array(&$q[count($q) - 1]['qn_text']);
+                            } /* Quiz parameter */
+                            elseif ($st == self::ST_OUTER || $st == self::ST_PARAM_DD || $st == self::ST_FORM || $st == self::ST_FORM_DD) {
+                                $st = self::ST_OUTER;
+                                $field = '';
+                                foreach ($chk[1] as $i => $c) {
+                                    if ($c[0]) {
+                                        $field = self::$test_keys[$i - 2]; /* -2 because there are two extra (question) and (form) keys in the beginning */
+                                        break;
+                                    }
+                                }
+                                if ($field) {
+                                    /* Parameter - found */
+                                    $log .= "[INFO] Begin quiz field \"$field\" section: $log_el\n";
+                                    $append = array(&$quiz["test_$field"]);
+                                } else {
+                                    /* This should never happen ! */
+                                    $line = __FILE__ . ':' . __LINE__;
+                                    $log .= "[ERROR] MYSTICAL BUG: Unknown quiz field at $line in: $log_el\n";
+                                }
+                            } else {
+                                /* INFO: Parameter section inside question section / choice section */
+                                $log .= "[WARN] Field section must come before questions: $log_el\n";
+                            }
+                        } elseif ($st == self::ST_QUESTION || $st == self::ST_CHOICE || $st == self::ST_CHOICES) {
+                            $chk = DOMParseUtils::checkNode($element, self::$regexp_question, true);
+                            if ($chk) {
+                                /* Question sub-section */
+                                $sid = '';
+                                foreach ($chk[1] as $i => $c) {
+                                    if ($c[0]) {
+                                        $sid = self::$qn_keys[$i];
+                                        break;
+                                    }
+                                }
+                                if (!$sid) {
+                                    /* This should never happen ! */
+                                    $line = __FILE__ . ':' . __LINE__;
+                                    $log .= "[ERROR] MYSTICAL BUG: Unknown question field at $line in: $log_el\n";
+                                } elseif ($sid == 'comments') {
+                                    /* Question comments */
+                                    $log .= "[INFO] Begin question comments: $log_el\n";
+                                    $st = self::ST_QUESTION;
+                                    $append = NULL;
+                                } elseif ($sid == 'explanation' || $sid == 'label') {
+                                    /* Question field */
+                                    $log .= "[INFO] Begin question $sid: $log_el\n";
+                                    $st = self::ST_QUESTION;
+                                    $append = array(&$q[count($q) - 1]["qn_$sid"]);
+                                } else {
+                                    /* Some kind of choice(s) section */
+                                    $correct = $sid == 'correct' || $sid == 'corrects' ? 1 : 0;
+                                    $lc = $correct ? 'correct choice' : 'choice';
+                                    if ($sid == 'correct' || $sid == 'choice') {
+                                        $log .= "[INFO] Begin single $lc section: $log_el\n";
+                                        $q[count($q) - 1]['choices'][] = array('ch_correct' => $correct);
+                                        $st = self::ST_CHOICE;
+                                        $append = array(&$q[count($q) - 1]['choices'][count($q[count($q) - 1]['choices']) - 1]['ch_text']);
+                                    } else {
+                                        $log .= "[INFO] Begin multiple $lc section: $log_el\n";
+                                        $st = self::ST_CHOICES;
+                                        $append = NULL;
+                                    }
+                                }
+                            } else {
+                                /* INFO: unknown heading inside question */
+                                $log .= "[WARN] Unparsed heading inside question: $log_el\n";
+                                $end = true;
+                            }
+                        } else {
+                            /* INFO: unknown heading */
+                            $log .= "[WARN] Unparsed heading outside question: $log_el\n";
+                            $end = true;
+                        }
                     }
-                    $log_el = $log_el . self::textlog($e) . $log_el;
-                    /* Match question/parameter section title */
-                    $chk = DOMParseUtils::checkNode($e, self::$regexp_test, true);
-                    if ($chk) {
-                        /* Form section */
-                        if ($chk[1][0][0]) {
-                            $log .= "[INFO] Begin form section: $log_el\n";
-                            $st = self::ST_FORM;
-                        } /* Question section */
-                        elseif ($chk[1][1][0]) {
-                            if ($q)
-                                self::checkLastQuestion($q, $log);
-                            /* Question section - found */
-                            $log .= "[INFO] Begin question section: $log_el\n";
-                            $st = self::ST_QUESTION;
-                            if (preg_match('/\?([^"\'\s]*)/s', $editsection, $m)) {
-                                /* Extract page title and section number from editsection link */
-                                $es = array();
-                                parse_str(htmlspecialchars_decode($m[1]), $es);
-                                preg_match('/\d+/', $es['section'], $m);
-                                $anch = $es['title'] . '|' . $m[0];
-                            } else
-                                $anch = NULL;
-                            $q[] = array(
-                                'qn_label' => DOMParseUtils::saveChildren($chk[0], true),
-                                'qn_anchor' => $anch,
-                                'qn_editsection' => $editsection,
-                            );
-                            $append = array(&$q[count($q) - 1]['qn_text']);
-                        } /* Quiz parameter */
-                        elseif ($st == self::ST_OUTER || $st == self::ST_PARAM_DD || $st == self::ST_FORM || $st == self::ST_FORM_DD) {
-                            $st = self::ST_OUTER;
+                    /* <dt> for a parameter */
+                    elseif (($st == self::ST_OUTER || $st == self::ST_PARAM_DD) && $element->nodeName == 'dt') {
+                        $chk = DOMParseUtils::checkNode($element, self::$regexp_test_nq, true);
+                        $log_el = '; ' . trim(strip_tags(DOMParseUtils::saveChildren($element))) . ':';
+                        if ($chk) {
                             $field = '';
                             foreach ($chk[1] as $i => $c) {
                                 if ($c[0]) {
@@ -285,193 +333,72 @@ class EasyTestsUpdater
                             }
                             if ($field) {
                                 /* Parameter - found */
-                                $log .= "[INFO] Begin quiz field \"$field\" section: $log_el\n";
-                                $append = array(&$quiz["test_$field"]);
+                                $log .= "[INFO] Begin definition list item for quiz field \"$field\": $log_el\n";
+                                $st = self::ST_PARAM_DD;
                             } else {
                                 /* This should never happen ! */
                                 $line = __FILE__ . ':' . __LINE__;
                                 $log .= "[ERROR] MYSTICAL BUG: Unknown quiz field at $line in: $log_el\n";
                             }
                         } else {
-                            /* INFO: Parameter section inside question section / choice section */
-                            $log .= "[WARN] Field section must come before questions: $log_el\n";
+                            /* INFO: unknown <dt> key */
+                            $log .= "[WARN] Unparsed definition list item: $log_el\n";
+                            $end = true;
                         }
-                    } elseif ($st == self::ST_QUESTION || $st == self::ST_CHOICE || $st == self::ST_CHOICES) {
-                        $chk = DOMParseUtils::checkNode($e, self::$regexp_question, true);
+                    }
+                    /* Value for quiz parameter $field */
+                    elseif ($st == self::ST_PARAM_DD && $element->nodeName == 'dd') {
+                        $value = self::transformFieldValue($field, DOMParseUtils::saveChildren($element));
+                        $log .= "[INFO] Quiz $field = " . self::textlog($value) . "\n";
+                        $quiz["test_$field"] = $value;
+                        $st = self::ST_OUTER;
+                        $field = '';
+                    } elseif ($st == self::ST_CHOICE && ($element->nodeName == 'ul' || $element->nodeName == 'ol') &&
+                        $element->childNodes->length == 1 && !$append[0]
+                    ) {
+                        /* <ul>/<ol> with single <li> inside choice */
+                        $log .= "[INFO] Stripping single-item list from single-choice section";
+                        $element = $element->childNodes->item(0);
+                        $chk = DOMParseUtils::checkNode($element, self::$regexp_correct, true);
                         if ($chk) {
-                            /* Question sub-section */
-                            $sid = '';
-                            foreach ($chk[1] as $i => $c) {
-                                if ($c[0]) {
-                                    $sid = self::$qn_keys[$i];
-                                    break;
-                                }
-                            }
-                            if (!$sid) {
-                                /* This should never happen ! */
-                                $line = __FILE__ . ':' . __LINE__;
-                                $log .= "[ERROR] MYSTICAL BUG: Unknown question field at $line in: $log_el\n";
-                            } elseif ($sid == 'comments') {
-                                /* Question comments */
-                                $log .= "[INFO] Begin question comments: $log_el\n";
-                                $st = self::ST_QUESTION;
-                                $append = NULL;
-                            } elseif ($sid == 'explanation' || $sid == 'label') {
-                                /* Question field */
-                                $log .= "[INFO] Begin question $sid: $log_el\n";
-                                $st = self::ST_QUESTION;
-                                $append = array(&$q[count($q) - 1]["qn_$sid"]);
-                            } else {
-                                /* Some kind of choice(s) section */
-                                $correct = $sid == 'correct' || $sid == 'corrects' ? 1 : 0;
-                                $lc = $correct ? 'correct choice' : 'choice';
-                                if ($sid == 'correct' || $sid == 'choice') {
-                                    $log .= "[INFO] Begin single $lc section: $log_el\n";
-                                    $q[count($q) - 1]['choices'][] = array('ch_correct' => $correct);
-                                    $st = self::ST_CHOICE;
-                                    $append = array(&$q[count($q) - 1]['choices'][count($q[count($q) - 1]['choices']) - 1]['ch_text']);
-                                } else {
-                                    $log .= "[INFO] Begin multiple $lc section: $log_el\n";
-                                    $st = self::ST_CHOICES;
-                                    $append = NULL;
-                                }
-                            }
-                        } else {
-                            /* INFO: unknown heading inside question */
-                            $log .= "[WARN] Unparsed heading inside question: $log_el\n";
-                            $fall = true;
+                            $element = $chk[0];
+                            $n = count($q[count($q) - 1]['choices']);
+                            $q[count($q) - 1]['choices'][$n - 1]['ch_correct'] = 1;
+                            $log .= "[INFO] Correct choice marker is present in single-item list";
                         }
-                    } else {
-                        /* INFO: unknown heading */
-                        $log .= "[WARN] Unparsed heading outside question: $log_el\n";
-                        $fall = true;
+                        $append[0] .= trim(DOMParseUtils::saveChildren($element));
+                    } elseif ($st == self::ST_CHOICE && $element->nodeName == 'p') {
+                        if ($append[0])
+                            $append[0] .= '<br />';
+                        $append[0] .= trim(DOMParseUtils::saveChildren($element));
                     }
-                } /* <dt> for form field */
-                elseif (($st == self::ST_FORM || $st == self::ST_FORM_DD) && $e->nodeName == 'dt') {
-                    $chk = DOMParseUtils::checkNode($e, self::$regexp_form, true);
-                    $log_el = '; ' . trim(strip_tags(DOMParseUtils::saveChildren($e))) . ':';
-                    if ($chk) {
-                        $field = '';
-                        foreach ($chk[1] as $i => $c) {
-                            if ($c[0]) {
-                                $field = self::$form_keys[$i];
-                                break;
-                            }
+                    elseif ($st == self::ST_CHOICES && $element->nodeName == 'li') {
+                        $chk = DOMParseUtils::checkNode($element, wfMsgNoTrans('easytests-parse-correct'), true);
+                        $c = $correct;
+                        if ($chk) {
+                            $element = $chk[0];
+                            $c = 1;
                         }
-                        if ($field) {
-                            $checkbox_name = self::$form_field_types[$field][0] == 'checkbox' ? trim(DOMParseUtils::saveChildren($chk[0], true)) : '';
-                            /* Form field - found */
-                            $log .= "[INFO] Begin definition list item for quiz field \"$field\": $log_el\n";
-                            $st = self::ST_FORM_DD;
-                        } else {
-                            /* This should never happen ! */
-                            $line = __FILE__ . ':' . __LINE__;
-                            $log .= "[ERROR] MYSTICAL BUG: Unknown quiz field at $line in: $log_el\n";
-                        }
-                    } else {
-                        /* INFO: unknown <dt> key */
-                        $log .= "[WARN] Unparsed definition list item: $log_el\n";
-                        $fall = true;
-                    }
-                } /* Form field(s) of type $field */
-                elseif ($st == self::ST_FORM_DD && $e->nodeName == 'dd') {
-                    $value = DOMParseUtils::saveChildren($e);
-                    if (self::$form_field_types[$field][2]) {
-                        $value = array_map('trim', explode(',', $value));
-                    } else {
-                        $value = array($value);
-                    }
-                    foreach ($value as $v) {
-                        $f = array(
-                            'name' => $checkbox_name ? $checkbox_name : $v,
-                            'type' => self::$form_field_types[$field][0],
-                            'mandatory' => self::$form_field_types[$field][1],
-                            'value' => $checkbox_name ? $v : '1',
-                            'multiple' => self::$form_field_types[$field][2],
+                        $children = DOMParseUtils::saveChildren($element);
+                        $log .= "[INFO] Parsed " . ($c ? "correct " : "") . "choice: " . trim(strip_tags($children)) . "\n";
+                        $q[count($q) - 1]['choices'][] = array(
+                            'ch_correct' => $c,
+                            'ch_text' => trim($children),
                         );
-                        if ($f['type'] != 'checkbox') {
-                            unset($f['value']);
-                        }
-                        $log .= "[INFO] Parsed" . ($f['mandatory'] ? " mandatory" : "") . " " . $f['type'] . " field: " .
-                            self::textlog($f['name']) . ($f['type'] == 'checkbox' ? ' = ' . self::textlog($f['value']) : '') . "\n";
-                        $form[] = $f;
-                    }
-                    $st = self::ST_FORM;
-                    $field = '';
-                } /* <dt> for a parameter */
-                elseif (($st == self::ST_OUTER || $st == self::ST_PARAM_DD) && $e->nodeName == 'dt') {
-                    $chk = DOMParseUtils::checkNode($e, self::$regexp_test_nq, true);
-                    $log_el = '; ' . trim(strip_tags(DOMParseUtils::saveChildren($e))) . ':';
-                    if ($chk) {
-                        $field = '';
-                        foreach ($chk[1] as $i => $c) {
-                            if ($c[0]) {
-                                $field = self::$test_keys[$i - 2]; /* -2 because there are two extra (question) and (form) keys in the beginning */
-                                break;
-                            }
-                        }
-                        if ($field) {
-                            /* Parameter - found */
-                            $log .= "[INFO] Begin definition list item for quiz field \"$field\": $log_el\n";
-                            $st = self::ST_PARAM_DD;
-                        } else {
-                            /* This should never happen ! */
-                            $line = __FILE__ . ':' . __LINE__;
-                            $log .= "[ERROR] MYSTICAL BUG: Unknown quiz field at $line in: $log_el\n";
-                        }
                     } else {
-                        /* INFO: unknown <dt> key */
-                        $log .= "[WARN] Unparsed definition list item: $log_el\n";
-                        $fall = true;
+                        $end = true;
                     }
-                } /* Value for quiz parameter $field */
-                elseif ($st == self::ST_PARAM_DD && $e->nodeName == 'dd') {
-                    $value = self::transformFieldValue($field, DOMParseUtils::saveChildren($e));
-                    $log .= "[INFO] Quiz $field = " . self::textlog($value) . "\n";
-                    $quiz["test_$field"] = $value;
-                    $st = self::ST_OUTER;
-                    $field = '';
-                } elseif ($st == self::ST_CHOICE && ($e->nodeName == 'ul' || $e->nodeName == 'ol') &&
-                    $e->childNodes->length == 1 && !$append[0]
-                ) {
-                    /* <ul>/<ol> with single <li> inside choice */
-                    $log .= "[INFO] Stripping single-item list from single-choice section";
-                    $e = $e->childNodes->item(0);
-                    $chk = DOMParseUtils::checkNode($e, self::$regexp_correct, true);
-                    if ($chk) {
-                        $e = $chk[0];
-                        $n = count($q[count($q) - 1]['choices']);
-                        $q[count($q) - 1]['choices'][$n - 1]['ch_correct'] = 1;
-                        $log .= "[INFO] Correct choice marker is present in single-item list";
-                    }
-                    $append[0] .= trim(DOMParseUtils::saveChildren($e));
-                } elseif ($st == self::ST_CHOICE && $e->nodeName == 'p') {
-                    if ($append[0])
-                        $append[0] .= '<br />';
-                    $append[0] .= trim(DOMParseUtils::saveChildren($e));
-                } elseif ($st == self::ST_CHOICES && $e->nodeName == 'li') {
-                    $chk = DOMParseUtils::checkNode($e, wfMsgNoTrans('easytests-parse-correct'), true);
-                    $c = $correct;
-                    if ($chk) {
-                        $e = $chk[0];
-                        $c = 1;
-                    }
-                    $children = DOMParseUtils::saveChildren($e);
-                    $log .= "[INFO] Parsed " . ($c ? "correct " : "") . "choice: " . trim(strip_tags($children)) . "\n";
-                    $q[count($q) - 1]['choices'][] = array(
-                        'ch_correct' => $c,
-                        'ch_text' => trim($children),
-                    );
-                } else
-                    $fall = true;
-                if ($fall) {
+                }
+                if ($end) {
                     /* Save position inside append-string to remove
                        children before appending the element itself */
-                    $stack[] = array($e, 0, false, $append ? strlen($append[0]) : 0);
+                    $stack[] = array($element, 0, false, $append ? strlen($append[0]) : 0);
                 } else
                     $stack[count($stack) - 1][2] = true;
-            } elseif ($append && $e->nodeType == XML_TEXT_NODE && trim($e->nodeValue))
-                $append[0] .= $e->nodeValue;
+            } elseif ($append && $element->nodeType == XML_TEXT_NODE && trim($element->nodeValue)) {
+                $append[0] .= $element->nodeValue;
+            }
+        // end while
         }
         if ($q)
             self::checkLastQuestion($q, $log);
@@ -493,15 +420,23 @@ class EasyTestsUpdater
     /* Parse $text and update data of the quiz linked to article title */
     static function updateQuiz($article, $text)
     {
+        /*
+         * defining variables
+         */
+        $t2q = array();
+        $question_keys = array();
+        $choices_keys = array();
+        $questions = array();
+        $choices = array();
+        $hashes = array();
+
         $dbw = wfGetDB(DB_MASTER);
         $html = self::parse($article, $text);
-        $quiz = self::parseQuiz2($html);
+        $quiz = self::parseQuiz($html);
         $quiz['test_page_title'] = $article->getTitle()->getText();
         $quiz['test_id'] = $dbw->selectField('et_test', 'test_id', array('test_page_title' => $quiz['test_page_title']), __METHOD__);
+
         if (!$quiz['test_id']) {
-            // Test IDs are auto-generated from article IDs,
-            // but other code DOES NOT rely on it. It is required
-            // for correct operation with et_* in $wgSharedTables.
             $quiz['test_id'] = $article->getId();
         }
         if (!$quiz['questions']) {
@@ -527,13 +462,7 @@ class EasyTestsUpdater
             }
             return;
         }
-        $quiz['test_log'] = "[INFO] Article revision: " . $article->getLatest() . "\n" . $quiz['test_log'];
-        $t2q = array();
-        $qkeys = array();
-        $ckeys = array();
-        $questions = array();
-        $choices = array();
-        $hashes = array();
+
         foreach ($quiz['questions'] as $i => $q) {
             $hash = $q['qn_text'];
             foreach ($q['choices'] as $c)
@@ -543,13 +472,13 @@ class EasyTestsUpdater
             foreach ($q['choices'] as $j => $c) {
                 $c['ch_question_hash'] = $hash;
                 $c['ch_num'] = $j + 1;
-                $ckeys += $c;
+                $choices_keys += $c;
                 $choices[] = $c;
             }
             $q['qn_hash'] = $hash;
             $hashes[] = $hash;
             unset($q['choices']);
-            $qkeys += $q;
+            $question_keys += $q;
             $questions[] = $q;
             $t2q[] = array(
                 'qt_test_id' => $quiz['test_id'],
@@ -557,15 +486,21 @@ class EasyTestsUpdater
                 'qt_num' => $i + 1,
             );
         }
-        foreach ($qkeys as $k => $v)
-            if (!array_key_exists($k, $questions[0]))
+        foreach ($question_keys as $k => $v) {
+            if (!array_key_exists($k, $questions[0])) {
                 $questions[0][$k] = '';
-        foreach ($ckeys as $k => $v)
-            if (!array_key_exists($k, $choices[0]))
+            }
+        }
+        foreach ($choices_keys as $k => $v) {
+            if (!array_key_exists($k, $choices[0])) {
                 $choices[0][$k] = '';
+            }
+        }
+
         unset($quiz['questions']);
         $dbw->delete('et_question_test', array('qt_test_id' => $quiz['test_id']), __METHOD__);
         $dbw->delete('et_choice', array('ch_question_hash' => $hashes), __METHOD__);
+
         self::insertOrUpdate($dbw, 'et_test', array($quiz), __METHOD__);
         self::insertOrUpdate($dbw, 'et_question', $questions, __METHOD__);
         self::insertOrUpdate($dbw, 'et_question_test', $t2q, __METHOD__);
@@ -596,4 +531,3 @@ class EasyTestsUpdater
         return $dbw->query($sql, $fname);
     }
 }
-

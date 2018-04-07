@@ -28,7 +28,7 @@ class EasyTestsPage extends SpecialPage
     static function quizArticleInfo($test_title)
     {
         global $wgOut, $wgScriptPath;
-        $wgOut->addExtensionStyle("$wgScriptPath/extensions/" . basename(dirname(__FILE__)) . "/easytest-page.css");
+        $wgOut->addExtensionStyle("$wgScriptPath/extensions/" . basename(dirname(__FILE__)) . "/css/easytest-page.css");
         /* Load the test without questions */
         $quiz = self::loadTest(array('name' => $test_title), NULL, true);
         if (!$quiz)
@@ -171,7 +171,7 @@ class EasyTestsPage extends SpecialPage
     {
         global $wgOut, $wgRequest, $wgTitle, $wgLang, $wgServer, $wgScriptPath, $wgUser;
         $args = $_GET + $_POST;
-        $wgOut->addExtensionStyle("$wgScriptPath/extensions/" . basename(dirname(__FILE__)) . "/easytest.css");
+        $wgOut->addExtensionStyle("$wgScriptPath/extensions/" . basename(dirname(__FILE__)) . "/css/easytest.css");
 
         $mode = isset($args['mode']) ? $args['mode'] : '';
 
@@ -528,7 +528,6 @@ class EasyTestsPage extends SpecialPage
         $s = self::xelement('table', array('class' => 'easytests-toc'), $s);
         return $s;
     }
-
 
     /*
         We will use it also in TUTOR mode to get question with choices.
@@ -904,32 +903,35 @@ EOT;
         foreach ($test['questions'] as $i => $q) {
             if (!empty($_POST['a'][$i])) {
                 $n = $_POST['a'][$i];
-                /*
-                 * @TODO: change mechanism identifying questions
-                 */
-                // Perhaps free-text question
-                if ($q['correct_count'] >= count($q['choices'])) {
-                    $n = trim($n);
-                    $is_correct = false;
-                    foreach ($q['choices'] as $ch)
-                        if ($n === $ch['ch_text'])
-                            $is_correct = true;
-                    $text = $n;
-                    $num = 0;
-
-                } // Multiple correct answers question
-                elseif ($q['correct_count'] <= count($q['choices']) and $q['correct_count'] > 1) {
-                    foreach ($n as $key => $val) {
-                        $is_correct = $q['choices'][$val - 1]['ch_correct'] ? 1 : 0;
+                switch($q['correct_count']){
+                    case ($q['correct_count'] == count($q['choices']) and count($q['choices'] == 1)):
+                        if($q['choices'] == 1) {
+                            $n = trim($n);
+                            $is_correct = false;
+                            foreach ($q['choices'] as $ch) {
+                                if ($n === $ch['ch_text']) {
+                                    $is_correct = true;
+                                }
+                            }
+                            $text = $n;
+                            $num = 0;
+                        }else{
+                            continue;
+                        }
+                        break;
+                    case($q['correct_count'] <= count($q['choices']) and $q['correct_count'] > 1):
+                        foreach ($n as $key => $val) {
+                            $is_correct = $q['choices'][$val - 1]['ch_correct'] ? 1 : 0;
+                            $text = NULL;
+                            $num = $q['choices'][$val - 1]['ch_num'];
+                        }
+                        break;
+                    default:
+                        $is_correct = $q['choices'][$n - 1]['ch_correct'] ? 1 : 0;
                         $text = NULL;
-                        $num = $q['choices'][$val - 1]['ch_num'];
-                    }
-                } // One correct answer question
-                else {
-                    $is_correct = $q['choices'][$n - 1]['ch_correct'] ? 1 : 0;
-                    $text = NULL;
-                    $num = $q['choices'][$n - 1]['ch_num'];
+                        $num = $q['choices'][$n - 1]['ch_num'];
                 }
+
                 /* Build rows for saving answers into database */
                 $rows[] = $answers[$q['qn_hash']] = array(
                     'cs_ticket' => $ticket['tk_id'],
@@ -982,7 +984,10 @@ EOT;
             if ($formdef) {
                 // Check for empty form fields
                 foreach ($formdef as $i => $field) {
-                    if ($field['type'] == 'name' || $field['type'] == 'html') {
+                    if(!isset($field['type'])) {
+                        $field['type'] = false;
+                    }
+                    /*if ($field['type'] == 'name' || $field['type'] == 'html') {
                         // Don't check name field (= prompt)
                     } elseif (empty($_REQUEST["detail_$i"]) && $field['mandatory'] &&
                         (empty($field['multiple']) || empty($values[trim($field['name'])]))
@@ -1002,7 +1007,7 @@ EOT;
                         } else {
                             $values[$n] = $v;
                         }
-                    }
+                    }*/
                 }
                 if ($empty) {
                     // Ask user to fill fields if some of them are empty
