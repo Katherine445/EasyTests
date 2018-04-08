@@ -216,6 +216,8 @@ class EasyTestsUpdater
                 // we don't need to parse <body> element
                 if($element->nodeName !== 'body') {
                     $end = false;
+
+                    // find section definition
                     if (preg_match('/^h(\d)$/is', $element->nodeName, $m)) {
                         $level = $m[1];
                         $log_el = str_repeat('=', $level);
@@ -254,10 +256,12 @@ class EasyTestsUpdater
                                 } else {
                                     $anch = NULL;
                                 }
+                                // define question default array
                                 $q[] = array(
                                     'qn_label' => DOMParseUtils::saveChildren($chk[0], true),
                                     'qn_anchor' => $anch,
                                     'qn_editsection' => $editsection,
+                                    'qn_type' => 'simple'
                                 );
                                 $append = array(&$q[count($q) - 1]['qn_text']);
 
