@@ -49,7 +49,7 @@ class EasyTestsUpdater
         'test_autofilter_min_tries' => 0,
         'test_autofilter_success_percent' => 90,
     );
-    static $test_keys, $form_keys;
+    static $test_keys;
     static $regexp_test, $regexp_test_nq, $regexp_question, $regexp_true, $regexp_correct, $regexp_form;
     static $qn_keys = array('choice', 'choices', 'correct', 'corrects', 'label', 'explanation', 'comments', 'correct-matches', 'choices-matches');
 
@@ -87,7 +87,7 @@ class EasyTestsUpdater
         $qn_regexp = array();
         $form_regexp = array();
         self::$test_keys = array_keys(self::$test_field_types);
-        self::$form_keys = array_keys(self::$form_field_types);
+
         foreach (self::$test_keys as $k) {
             $test_regexp[] = '(' . wfMsgReal("easytests-parse-test_$k", NULL, true, $lang, false) . ')';
         }
@@ -167,23 +167,30 @@ class EasyTestsUpdater
     const ST_CHOICES = 4;   /* Inside multiple choices section */
 
     /* parseQuiz() using a state machine :-) */
+    /**
+     * @param $html
+     * @return array
+     */
     static function parseQuiz($html)
     {
         self::getRegexps();
         $log = '';
         $document = DOMParseUtils::loadDOM($html);
+
         /* Stack: [ [ Element, ChildIndex, AlreadyProcessed, AppendStrlen ] , [ ... ] ] */
         $stack = array(array($document->documentElement, 0, false, 0));
+
         $st = self::ST_OUTER;   /* State index */
         $append = NULL;         /* Array(&$str) or NULL. When array(&$str), content is appended to $str. */
+
         /* Variables: */
         $form = array();        /* Form definition */
         $q = array();           /* Questions */
         $quiz = self::$test_default_values; /* Quiz field => value */
         $field = '';            /* Current parsed field */
-        $checkbox_name = '';    /* Checkbox field name */
         $correct = 0; /* Is current choice(s) section for correct choices */
         $end = true;
+
         /* Loop through all elements: */
         while ($stack) {
             list($nodeDOMElement, $i, $h, $l) = $stack[count($stack) - 1];
@@ -199,11 +206,14 @@ class EasyTestsUpdater
                 }
                 continue;
             }
-            //count child nodes
+            //increment ChildIndex
             $stack[count($stack) - 1][1]++;
+
+            //get first child element
             $element = $nodeDOMElement->childNodes->item($i);
+
             if ($element->nodeType == XML_ELEMENT_NODE) {
-                // check if current element
+                // we don't need to parse <body> element
                 if($element->nodeName !== 'body') {
                     $end = false;
                     if (preg_match('/^h(\d)$/is', $element->nodeName, $m)) {
@@ -214,61 +224,49 @@ class EasyTestsUpdater
                         if ($element->childNodes->length) {
                             foreach ($element->childNodes as $span) {
                                 if ($span->nodeName == 'span' && ($span->getAttribute('class') == 'editsection' ||
-                                        $span->getAttribute('class') == 'mw-editsection')
-                                ) {
+                                        $span->getAttribute('class') == 'mw-editsection')) {
                                     $element->removeChild($span);
                                     $editsection = $document->saveXML($span);
                                 }
                             }
                         }
+
                         $log_el = $log_el . self::textlog($element) . $log_el;
+
                         /* Match question/parameter section title */
                         $chk = DOMParseUtils::checkNode($element, self::$regexp_test, true);
                         if ($chk) {
                             if ($chk[1][1][0]) {
-                                if ($q)
+                                if ($q) {
                                     self::checkLastQuestion($q, $log);
+                                }
+
                                 /* Question section - found */
                                 $log .= "[INFO] Begin question section: $log_el\n";
                                 $st = self::ST_QUESTION;
                                 if (preg_match('/\?([^"\'\s]*)/s', $editsection, $m)) {
+
                                     /* Extract page title and section number from editsection link */
                                     $es = array();
                                     parse_str(htmlspecialchars_decode($m[1]), $es);
                                     preg_match('/\d+/', $es['section'], $m);
                                     $anch = $es['title'] . '|' . $m[0];
-                                } else
+                                } else {
                                     $anch = NULL;
+                                }
                                 $q[] = array(
                                     'qn_label' => DOMParseUtils::saveChildren($chk[0], true),
                                     'qn_anchor' => $anch,
                                     'qn_editsection' => $editsection,
                                 );
                                 $append = array(&$q[count($q) - 1]['qn_text']);
-                            } /* Quiz parameter */
-                            elseif ($st == self::ST_OUTER || $st == self::ST_PARAM_DD || $st == self::ST_FORM || $st == self::ST_FORM_DD) {
-                                $st = self::ST_OUTER;
-                                $field = '';
-                                foreach ($chk[1] as $i => $c) {
-                                    if ($c[0]) {
-                                        $field = self::$test_keys[$i - 2]; /* -2 because there are two extra (question) and (form) keys in the beginning */
-                                        break;
-                                    }
-                                }
-                                if ($field) {
-                                    /* Parameter - found */
-                                    $log .= "[INFO] Begin quiz field \"$field\" section: $log_el\n";
-                                    $append = array(&$quiz["test_$field"]);
-                                } else {
-                                    /* This should never happen ! */
-                                    $line = __FILE__ . ':' . __LINE__;
-                                    $log .= "[ERROR] MYSTICAL BUG: Unknown quiz field at $line in: $log_el\n";
-                                }
+
                             } else {
                                 /* INFO: Parameter section inside question section / choice section */
                                 $log .= "[WARN] Field section must come before questions: $log_el\n";
                             }
-                        } elseif ($st == self::ST_QUESTION || $st == self::ST_CHOICE || $st == self::ST_CHOICES) {
+                        }
+                        elseif ($st == self::ST_QUESTION || $st == self::ST_CHOICE || $st == self::ST_CHOICES) {
                             $chk = DOMParseUtils::checkNode($element, self::$regexp_question, true);
                             if ($chk) {
                                 /* Question sub-section */
@@ -325,11 +323,11 @@ class EasyTestsUpdater
                         $log_el = '; ' . trim(strip_tags(DOMParseUtils::saveChildren($element))) . ':';
                         if ($chk) {
                             $field = '';
-                            foreach ($chk[1] as $i => $c) {
-                                if ($c[0]) {
-                                    $field = self::$test_keys[$i - 2]; /* -2 because there are two extra (question) and (form) keys in the beginning */
-                                    break;
-                                }
+                            //remove empty elements from array
+                            $fields_array = self::trimEmptyElements($chk[1]);
+                            foreach ($fields_array as $key => $val) {
+                                $field = self::$test_keys[$val['current_index'] - 2]; /* -2 because there are two extra (question) and (form) keys in the beginning */
+                                break;
                             }
                             if ($field) {
                                 /* Parameter - found */
@@ -400,8 +398,9 @@ class EasyTestsUpdater
             }
         // end while
         }
-        if ($q)
+        if ($q) {
             self::checkLastQuestion($q, $log);
+        }
         $quiz['questions'] = $q;
         if (!empty($quiz['test_user_details'])) {
             /* Compatibility with older "Ask User:" */
@@ -529,5 +528,16 @@ class EasyTestsUpdater
             $key = "`$key`=VALUES(`$key`)";
         $sql .= ' ON DUPLICATE KEY UPDATE ' . implode(',', $keys);
         return $dbw->query($sql, $fname);
+    }
+
+    static function trimEmptyElements($arr) {
+        $new_arr = array();
+        foreach ($arr as $key=>$val) {
+            if ($val[0] !== '') {
+                $val['current_index'] = $key;
+                array_push($new_arr, $val);
+            }
+        }
+        return $new_arr;
     }
 }
