@@ -26,12 +26,18 @@ class DOMParseUtils
                 // Remove founding html
                 array_splice($m, 0, 2);
             }
+            // set question type for hard questions
+            if(count($m) > 0 and self::findQuestionType($m, $wgLanguageCode)){
+                $m[count($m) - 1]['type'] = self::findQuestionType($m, $wgLanguageCode);
+            }
+
         } elseif (preg_match("/$re((?:\s*<[^<>]*>)*)\s*$/uis", $html, $m, PREG_OFFSET_CAPTURE)) {
             $new = substr($html, 0, $m[0][1]) . $m[count($m) - 1][0];
             array_shift($m);
             array_pop($m);
-        } else
+        } else {
             return false;
+        }
         $new_document = self::loadDOM($new);
         $new_element = $new_document->documentElement->childNodes->item(0)->childNodes->item(0);
         $new_element = $document->importNode($new_element, true);
@@ -217,5 +223,16 @@ class DOMParseUtils
         $dom->loadHTML("<?xml version='1.0' encoding='UTF-8'?>" . mb_convert_encoding($html, 'HTML-ENTITIES', 'UTF-8'));
         error_reporting($oe);
         return $dom;
+    }
+
+    public static function findQuestionType($array, $wgLanguageCode) {
+        $pattern1 = wfMsgReal('easytests-parse-question-match', NULL, true, $wgLanguageCode, false);
+        $pattern2 = wfMsgReal('easytests-parse-question-parallel', NULL, true, $wgLanguageCode, false);
+        if (preg_match("/^\s*((?:<[^<>]*>\s*)*)$pattern1/uis", $array[count($array) - 1][0])){
+            return 'order';
+        }elseif (preg_match("/^\s*((?:<[^<>]*>\s*)*)$pattern2/uis", $array[count($array) - 1][0])){
+            return 'parallel';
+        }
+        return false;
     }
 }

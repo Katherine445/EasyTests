@@ -256,10 +256,11 @@ $messages['uk'] = array(
 
     /* Regular expressions for questions, answers etc. */
     'easytests-parse-question' => '(?:Питання|Question)[:\s]*',
-    'easytests-parse-question-match' => '(?:Питання\s*відповідність|Matches\s*question)[:\s]*',
+    'easytests-parse-question-match' => '(?:Питання\s*порядок|Order\s*question)[:\s]*',
+    'easytests-parse-question-parallel' => '(?:Питання\s*відповідність|Parallel\s*question)[:\s]*',
     'easytests-parse-choice' => 'Відповідь|(?:Choice|Answer)(?!s)',
     'easytests-parse-choices' => 'Відповіді|Варіанти\s*відповідей|Choices|Answers',
-    'easytests-parse-correct-matches' => '(?:Правильні|Правильний)\s*(відповідності|порядок)[:\s]*',
+    'easytests-parse-correct-matches' => '(?:Правильний\s*порядок)[:\s]*',
     'easytests-parse-correct' => '(?:Правильна\s*відповідь|(?:Correct|Right)\s*(?:Choice|Answer)(?!s))[:\s]*',
     'easytests-parse-corrects' => '(?:(?:Правильні\s*відповіді|Правильні\s*варіанти\s*відповідей)|(?:Correct|Right)\s*(?:Choices|Answers))[:\s]*',
     'easytests-parse-label' => 'Мітка|Label',

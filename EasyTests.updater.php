@@ -25,19 +25,6 @@ class EasyTestsUpdater
         'autofilter_success_percent' => 4,
         'user_details' => 1,
     );
-    static $form_field_types = array(
-        // 'name'  => array('field type', is_mandatory, is_multiple),
-        'text' => array('html', false, false),
-        'name' => array('name', true, false),
-        'm-fields' => array('text', true, true),
-        'm-field' => array('text', true, false),
-        'fields' => array('text', false, true),
-        'field' => array('text', false, false),
-        'm-checks' => array('checkbox', true, true),
-        'm-check' => array('checkbox', true, false),
-        'checks' => array('checkbox', false, true),
-        'check' => array('checkbox', false, false),
-    );
     static $test_default_values = array(
         'test_name' => '',
         'test_intro' => '',
@@ -85,7 +72,6 @@ class EasyTestsUpdater
         $lang = $egEasyTestsContLang ? $egEasyTestsContLang : true;
         $test_regexp = array();
         $qn_regexp = array();
-        $form_regexp = array();
         self::$test_keys = array_keys(self::$test_field_types);
 
         foreach (self::$test_keys as $k) {
@@ -93,9 +79,6 @@ class EasyTestsUpdater
         }
         foreach (self::$qn_keys as $k) {
             $qn_regexp[] = '(' . wfMsgReal("easytests-parse-$k", NULL, true, $lang, false) . ')';
-        }
-        foreach (self::$form_field_types as $k => $def) {
-            $form_regexp[] = '(' . wfMsgReal("easytests-parse-form-$k", NULL, true, $lang, false) . ')';
         }
         $test_regexp_nq = $test_regexp;
         array_unshift($test_regexp, '(' . wfMsgReal('easytests-parse-question', NULL, true, $lang, false) . ')');
@@ -107,7 +90,6 @@ class EasyTestsUpdater
         self::$regexp_true = wfMsgReal('easytests-parse-true', NULL, true, $lang, false);
         self::$regexp_correct = wfMsgReal('easytests-parse-correct', NULL, true, $lang, false);
         self::$regexp_correct = wfMsgReal('easytests-parse-correct-matches', NULL, true, $lang, false);
-        self::$regexp_form = str_replace('/', '\\/', implode('|', $form_regexp));
     }
 
     /* Transform quiz field value according to its type */
@@ -139,6 +121,7 @@ class EasyTestsUpdater
     /* Check last question for correctness */
     static function checkLastQuestion(&$questions, &$log)
     {
+        // TODO: save answers order if question type != simple
         $lq = $questions[count($questions) - 1];
         $ncorrect = 0;
         $ok = false;
@@ -242,7 +225,11 @@ class EasyTestsUpdater
                                 if ($q) {
                                     self::checkLastQuestion($q, $log);
                                 }
-
+                                if(isset($chk[1][1]['type'])) {
+                                    $question_type = $chk[1][1]['type'];
+                                }else{
+                                    $question_type = '';
+                                }
                                 /* Question section - found */
                                 $log .= "[INFO] Begin question section: $log_el\n";
                                 $st = self::ST_QUESTION;
@@ -261,7 +248,7 @@ class EasyTestsUpdater
                                     'qn_label' => DOMParseUtils::saveChildren($chk[0], true),
                                     'qn_anchor' => $anch,
                                     'qn_editsection' => $editsection,
-                                    'qn_type' => 'simple'
+                                    'qn_type' => $question_type ? $question_type : 'simple'
                                 );
                                 $append = array(&$q[count($q) - 1]['qn_text']);
 
@@ -297,7 +284,7 @@ class EasyTestsUpdater
                                     $append = array(&$q[count($q) - 1]["qn_$sid"]);
                                 } else {
                                     /* Some kind of choice(s) section */
-                                    $correct = $sid == 'correct' || $sid == 'corrects' ? 1 : 0;
+                                    $correct = ($sid == 'correct' || $sid == 'corrects' || $sid == 'correct-matches') ? 1 : 0;
                                     $lc = $correct ? 'correct choice' : 'choice';
                                     if ($sid == 'correct' || $sid == 'choice') {
                                         $log .= "[INFO] Begin single $lc section: $log_el\n";
