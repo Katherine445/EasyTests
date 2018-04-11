@@ -36,7 +36,7 @@ CREATE TABLE /*$wgDBprefix*/et_question (
   -- question ID (md5 hash of question text)
   qn_hash        BINARY(32)     NOT NULL,
   -- question type (simple, order or parallel)
-  qn_type        ENUM ('simple', 'order', 'parallel') NOT NULL DEFAULT 'simple',
+  qn_type        ENUM ('simple', 'order', 'parallel', 'free-text') NOT NULL DEFAULT 'simple',
   -- question text
   qn_text        BLOB           NOT NULL,
   -- correct answer explanation text

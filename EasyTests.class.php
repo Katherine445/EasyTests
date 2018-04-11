@@ -148,6 +148,24 @@ class EasyTestsPage extends SpecialPage
         parent::__construct('EasyTests');
     }
 
+    /**
+     * buildOptionsArray
+     *
+     * @param $choices
+     * @return string
+     */
+    private static function buildOptionsArray($choices)
+    {
+        //@TODO: build options for selectbox
+        $options_arr = '';
+        foreach($choices as $key => $value) {
+            $options_arr = Xml::element('option', array(
+//                'value'=>
+            ));
+        }
+        return $options_arr;
+    }
+
     /* Check if the user is an administrator for the test $name */
     static function isAdminForTest($name)
     {
@@ -434,9 +452,9 @@ class EasyTestsPage extends SpecialPage
             );
             $q = NULL;
             while ($choice = $dbr->fetchRow($result)) {
-                if (!$q)
+                if (!$q) {
                     $q = &$rows[$choice['ch_question_hash']];
-                elseif ($q['qn_hash'] != $choice['ch_question_hash']) {
+                } elseif ($q['qn_hash'] != $choice['ch_question_hash']) {
                     if (!self::finalizeQuestionRow($q, $variant && true, $test['test_shuffle_choices']))
                         unset($rows[$q['qn_hash']]);
                     $q = &$rows[$choice['ch_question_hash']];
@@ -532,42 +550,62 @@ class EasyTestsPage extends SpecialPage
     /*
         We will use it also in TUTOR mode to get question with choices.
     */
-    static function getQuestionHtml($q, $k, $inputs = false)
+    static function getQuestionHtml($question, $qn_key, $inputs = false)
     {
         $html = '';
-
-        $html .= self::xelement('div', array('class' => 'easytests-question'), $q['qn_text']);
+        $html = self::xelement('div', array('class' => 'easytests-question'), $question['qn_text']);
         $choices = '';
-        if ($q['correct_count'] >= count($q['choices'])) {
-            /* This is a free-text question */
-            if ($inputs)
-                $html .= wfMsg('easytests-freetext') . ' ' . self::xelement('input', array('name' => "a[$k]", 'type' => 'text'));
-        } else {
-            foreach ($q['choices'] as $i => $c) {
+        switch ($question['qn_type']) {
+            case 'free-text':
                 if ($inputs) {
-                    /*
-                     * If correct choices more than 1, build input with checkboxes
-                     */
-                    if ($q['correct_count'] > 1) {
-                        $h = Xml::element('input', array(
-                                'name' => "a[$k][]",
-                                'type' => 'checkbox',
-                                'value' => $i + 1,
-                            )) . '&nbsp;' . $c['ch_text'];
+                    $html .= wfMsg('easytests-freetext') . ' ' . self::xelement('input', array('name' => "a[$qn_key]", 'type' => 'text'));
+                }
+                break;
+            case 'order':
+                // @TODO: build inputs
+                $options = self::buildOptionsArray($question['choices']);
+                foreach ($question['choices'] as $i => $choice) {
+                    $h = $choice['ch_text'] . '&nbsp;' . Xml::element('select', array(
+                            'name' => "a[$qn_key]",
+                        ), $options);
+
+                    $choices .= self::xelement('li', array('class' => 'easytests-choice'), $h);
+                }
+                $html .= self::xelement('ol', array('class' => 'easytests-choices'), $choices);
+                break;
+            case 'parallel':
+                // @TODO: build selectboxes
+                break;
+            default:
+                foreach ($question['choices'] as $i => $choice) {
+                    if ($inputs) {
+                        /*
+                         * If correct choices more than 1, build input with checkboxes
+                         */
+                        if ($question['correct_count'] > 1) {
+                            $h = Xml::element('input', array(
+                                    'name' => "a[$qn_key][]",
+                                    'type' => 'checkbox',
+                                    'value' => $i + 1,
+                                )) . '&nbsp;' . $choice['ch_text'];
+                        } else {
+                            /*
+                             * Question hashes and choice numbers are hidden from user.
+                             * They are taken from ticket during check.
+                             */
+                            $h = Xml::element('input', array(
+                                    'name' => "a[$qn_key]",
+                                    'type' => 'radio',
+                                    'value' => $i + 1,
+                                )) . '&nbsp;' . $choice['ch_text'];
+                        }
                     } else {
-                        /* Question hashes and choice numbers are hidden from user.
-                           They are taken from ticket during check. */
-                        $h = Xml::element('input', array(
-                                'name' => "a[$k]",
-                                'type' => 'radio',
-                                'value' => $i + 1,
-                            )) . '&nbsp;' . $c['ch_text'];
+                        $h = $choice['ch_text'];
                     }
-                } else
-                    $h = $c['ch_text'];
-                $choices .= self::xelement('li', array('class' => 'easytests-choice'), $h);
-            }
-            $html .= self::xelement('ol', array('class' => 'easytests-choices'), $choices);
+                    $choices .= self::xelement('li', array('class' => 'easytests-choice'), $h);
+                }
+                $html .= self::xelement('ol', array('class' => 'easytests-choices'), $choices);
+                break;
         }
         return $html;
     }
@@ -578,15 +616,15 @@ class EasyTestsPage extends SpecialPage
     static function getQuestionList($questions, $inputs = false, $editsection = false)
     {
         $html = '';
-        foreach ($questions as $k => $q) {
+        foreach ($questions as $key => $question) {
             $html .= Xml::element('hr');
-            $html .= self::xelement('a', array('name' => "q$k"), '', false);
-            $h = wfMsg('easytests-question', $k + 1);
+            $html .= self::xelement('a', array('name' => "q$key"), '', false);
+            $h = wfMsg('easytests-question', $key + 1);
             if ($editsection)
-                $h .= $q['qn_editsection'];
+                $h .= $question['qn_editsection'];
             $html .= self::xelement('h3', NULL, $h);
 
-            $html .= self::getQuestionHtml($q, $k, $inputs);
+            $html .= self::getQuestionHtml($question, $key, $inputs);
         }
         return $html;
     }
@@ -685,19 +723,20 @@ EOT;
     /* Display main form for testing */
     static function showTest($test, $ticket, $args, $empty = false)
     {
-        global $wgTitle, $wgOut, $wgRequest;
+        global $wgTitle, $wgOut;
 
-        if (!$ticket)
-            $ticket = self::createTicket($test, wfTimestampNow(TS_MW));
-        elseif ($ticket['tk_end_time'])
+        if (!$ticket) {
+            $ticket = self::createTicket($test, wfTimestampNow());
+        } elseif ($ticket['tk_end_time']) {
             die('BUG: ticket is already answered');
-        elseif (!$ticket['tk_start_time']) {
+        } elseif (!$ticket['tk_start_time']) {
             global $wgUser, $wgRequest;
+
             $userid = $wgUser->getId();
             if (!$userid)
                 $userid = NULL;
             $update = array(
-                'tk_start_time' => wfTimestampNow(TS_MW),
+                'tk_start_time' => wfTimestampNow(),
                 'tk_user_id' => $userid,
                 'tk_user_text' => $wgUser->getName(),
                 'tk_user_ip' => $wgRequest->getIP(),
@@ -719,7 +758,7 @@ EOT;
         $mandatory = '<span style="color:red" title="' . wfMsg('easytests-prompt-needed') . '">*</span>';
         if ($formdef) {
             foreach ($formdef as $i => $field) {
-                if(isset($field['type'])) {
+                if (isset($field['type'])) {
                     if ($field['type'] == 'name') {
                         if ($found_name) {
                             $field['type'] = 'text';
@@ -903,9 +942,9 @@ EOT;
         foreach ($test['questions'] as $i => $q) {
             if (!empty($_POST['a'][$i])) {
                 $n = $_POST['a'][$i];
-                switch($q['correct_count']){
-                    case ($q['correct_count'] == count($q['choices']) and count($q['choices'] == 1)):
-                        if($q['choices'] == 1) {
+                switch ($q['correct_count']) {
+                    case ($q['correct_count'] == count($q['choices']) and count($q['choices']) == 1):
+                        if ($q['choices'] == 1) {
                             $n = trim($n);
                             $is_correct = false;
                             foreach ($q['choices'] as $ch) {
@@ -915,7 +954,7 @@ EOT;
                             }
                             $text = $n;
                             $num = 0;
-                        }else{
+                        } else {
                             continue;
                         }
                         break;
@@ -984,30 +1023,9 @@ EOT;
             if ($formdef) {
                 // Check for empty form fields
                 foreach ($formdef as $i => $field) {
-                    if(!isset($field['type'])) {
+                    if (!isset($field['type'])) {
                         $field['type'] = false;
                     }
-                    /*if ($field['type'] == 'name' || $field['type'] == 'html') {
-                        // Don't check name field (= prompt)
-                    } elseif (empty($_REQUEST["detail_$i"]) && $field['mandatory'] &&
-                        (empty($field['multiple']) || empty($values[trim($field['name'])]))
-                    ) {
-                        $empty = true;
-                    } elseif (!$field['mandatory'] || $field['type'] != 'checkbox' || !empty($field['multiple'])) {
-                        // Saving mandatory non-multiple checkboxes is pointless, they're just a confirmation of something and always true
-                        $n = trim($field['name']);
-                        $v = !empty($_REQUEST["detail_$i"]) ? $_REQUEST["detail_$i"] : '';
-                        if ($field['type'] == 'checkbox' && $v) {
-                            $v = $field['value'];
-                        }
-                        if (!empty($values[$n])) {
-                            if ($v) {
-                                $values[$n] .= ", $v";
-                            }
-                        } else {
-                            $values[$n] = $v;
-                        }
-                    }*/
                 }
                 if ($empty) {
                     // Ask user to fill fields if some of them are empty
@@ -1032,7 +1050,7 @@ EOT;
             if (!$userid)
                 $userid = NULL;
             $update = array(
-                'tk_end_time' => wfTimestampNow(TS_MW),
+                'tk_end_time' => wfTimestampNow(),
                 'tk_displayname' => $args['prompt'],
                 'tk_user_id' => $userid,
                 'tk_user_text' => $wgUser->getName(),

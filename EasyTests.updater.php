@@ -139,12 +139,13 @@ class EasyTestsUpdater
         }else {
             $ok = true;
             if ($incorrect >= count($last_question['choices'])) {
-                if ($last_question['qn_type'] != 'simple') {
+                if ($last_question['qn_type'] != 'simple' and $last_question['qn_type'] != 'free-text') {
                     $log .= "[INFO] Defined \"".$last_question['qn_type']."\" question: ".self::textlog($last_question['qn_text']).": \n";
                     $last_question['choices'] = self::markChoicesOrder($last_question['choices'], $last_question['qn_type']);
                     $questions[count($questions) - 1] = $last_question;
                 }else {
                     $log .= "[INFO] All choices are marked correct, question will be free-text: " . self::textlog($last_question['qn_text']) . "\n";
+                    $questions[count($questions) - 1]['qn_type'] = 'free-text';
                 }
             }
         }
