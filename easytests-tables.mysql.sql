@@ -67,6 +67,10 @@ CREATE TABLE /*$wgDBprefix*/et_choice (
   ch_num           INT UNSIGNED        NOT NULL,
   -- choice text
   ch_text          BLOB                NOT NULL,
+  -- choice order for order question
+  ch_order_index   INT UNSIGNED        NOT NULL DEFAULT 0,
+  -- choice parallel
+  ch_parallel      BLOB                NULL,
   -- is this choice correct?
   ch_correct       TINYINT(1) UNSIGNED NOT NULL DEFAULT 0,
   PRIMARY KEY (ch_question_hash, ch_num)

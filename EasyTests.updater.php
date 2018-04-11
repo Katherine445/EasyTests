@@ -122,24 +122,35 @@ class EasyTestsUpdater
     static function checkLastQuestion(&$questions, &$log)
     {
         // TODO: save answers order if question type != simple
-        $lq = $questions[count($questions) - 1];
-        $ncorrect = 0;
+        $last_question = $questions[count($questions) - 1];
+        $incorrect = 0;
         $ok = false;
-        if ($lq['choices'])
-            foreach ($lq['choices'] as $lc)
-                if ($lc['ch_correct'])
-                    $ncorrect++;
-        if (!$lq['choices'] || !count($lq['choices']))
-            $log .= "[ERROR] No choices defined for question: " . self::textlog($lq['qn_text']) . "\n";
-        elseif (!$ncorrect)
-            $log .= "[ERROR] No correct choices for question: " . self::textlog($lq['qn_text']) . "\n";
-        else {
-            $ok = true;
-            if ($ncorrect >= count($lq['choices']))
-                $log .= "[INFO] All choices are marked correct, question will be free-text: " . self::textlog($lq['qn_text']) . "\n";
+        if ($last_question['choices']) {
+            foreach ($last_question['choices'] as $lchoise) {
+                if ($lchoise['ch_correct']) {
+                    $incorrect++;
+                }
+            }
         }
-        if (!$ok)
+        if (empty($last_question['choices'])) {
+            $log .= "[ERROR] No choices defined for question: " . self::textlog($last_question['qn_text']) . "\n";
+        }elseif (!$incorrect) {
+            $log .= "[ERROR] No correct choices for question: " . self::textlog($last_question['qn_text']) . "\n";
+        }else {
+            $ok = true;
+            if ($incorrect >= count($last_question['choices'])) {
+                if ($last_question['qn_type'] != 'simple') {
+                    $log .= "[INFO] Defined \"".$last_question['qn_type']."\" question: ".self::textlog($last_question['qn_text']).": \n";
+                    $last_question['choices'] = self::markChoicesOrder($last_question['choices'], $last_question['qn_type']);
+                    $questions[count($questions) - 1] = $last_question;
+                }else {
+                    $log .= "[INFO] All choices are marked correct, question will be free-text: " . self::textlog($last_question['qn_text']) . "\n";
+                }
+            }
+        }
+        if (!$ok) {
             array_pop($questions);
+        }
     }
 
     /* states: */
@@ -439,7 +450,11 @@ class EasyTestsUpdater
                 $quiz['test_log'] = "[ERROR] Article revision: " . $article->getLatest() . "\n" .
                     "[ERROR] No questions found in this revision, test not parsed!" . "\n" .
                     $quiz['test_log'];
-                $dbw->insert('et_test', $quiz, __METHOD__);
+                try {
+                    $dbw->insert('et_test', $quiz, __METHOD__);
+                } catch (DBQueryError $e) {
+                    $quiz['test_log'] = "[CRITICAL ERROR] Can't save test to database!;\n";
+                }
             } else {
                 $row['test_log'] = preg_replace('/^.*?No questions found in this revision[^\n]*\n/so', '', $row['test_log']);
                 $row['test_log'] = "[ERROR] Article revision: " . $article->getLatest() . "\n" .
@@ -455,8 +470,9 @@ class EasyTestsUpdater
 
         foreach ($quiz['questions'] as $i => $q) {
             $hash = $q['qn_text'];
-            foreach ($q['choices'] as $c)
+            foreach ($q['choices'] as $c) {
                 $hash .= $c['ch_text'];
+            }
             $hash = mb_strtolower(preg_replace('/\s+/s', '', $hash));
             $hash = md5($hash);
             foreach ($q['choices'] as $j => $c) {
@@ -486,10 +502,18 @@ class EasyTestsUpdater
                 $choices[0][$k] = '';
             }
         }
-
         unset($quiz['questions']);
-        $dbw->delete('et_question_test', array('qt_test_id' => $quiz['test_id']), __METHOD__);
-        $dbw->delete('et_choice', array('ch_question_hash' => $hashes), __METHOD__);
+        try {
+            $dbw->delete('et_question_test', array('qt_test_id' => $quiz['test_id']), __METHOD__);
+        } catch (DBUnexpectedError $e) {
+            $quiz['test_log'] = "[DATABASE ERROR] Something went wrong \n";
+        }
+
+        try {
+            $dbw->delete('et_choice', array('ch_question_hash' => $hashes), __METHOD__);
+        } catch (DBUnexpectedError $e) {
+            $quiz['test_log'] = "[DATABASE ERROR] Something went wrong \n";
+        }
 
         self::insertOrUpdate($dbw, 'et_test', array($quiz), __METHOD__);
         self::insertOrUpdate($dbw, 'et_question', $questions, __METHOD__);
@@ -530,5 +554,28 @@ class EasyTestsUpdater
             }
         }
         return $new_arr;
+    }
+
+    /**
+     * Define correct choices order
+     *
+     * @param array $choices
+     * @param string $question_type
+     * @return array
+     */
+    private static function markChoicesOrder($choices = [], $question_type = '')
+    {
+        if(!empty($choices)) {
+            switch ($question_type) {
+                case 'parallel':
+                    break;
+                case 'order':
+                    for($i = 0; $i < count($choices); $i++) {
+                        $choices[$i]['ch_order_index'] = $i;
+                    }
+                    break;
+            }
+        }
+        return $choices;
     }
 }
