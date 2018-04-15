@@ -4,7 +4,6 @@ require_once dirname(__FILE__) . '/includes/urandom.php';
 
 class EasyTestsPage extends SpecialPage
 {
-    /* Default OK% */
     const DEFAULT_OK_PERCENT = 80;
 
     static $modes = array(
@@ -24,7 +23,19 @@ class EasyTestsPage extends SpecialPage
      * Methods used in hooks outside Special:EasyTests
      */
 
-    // Display parse log and quiz actions for parsed quiz article
+    /**
+     * Constructor
+     */
+    function __construct()
+    {
+        global $IP, $wgScriptPath, $wgUser, $wgParser, $wgEmergencyContact;
+        parent::__construct('EasyTests');
+    }
+
+    /**
+     * Display parse log and quiz actions for parsed quiz article
+     *
+     */
     static function quizArticleInfo($test_title)
     {
         global $wgOut, $wgScriptPath;
@@ -68,30 +79,245 @@ class EasyTestsPage extends SpecialPage
         }
     }
 
-    // Get HTML for one question statistics message
-    static function questionStatsHtml($correct, $complete)
+    /**
+     * Load a test from database. Optionally shuffle/limit questions and answers,
+     * compute variant ID (sequence hash) and scores.
+     * $cond = array('id' => int $testId)
+     * or $cond = array('name' => string $testName)
+     * or $cond = array('name' => Title $testTitle)
+     */
+    static function loadTest($cond, $variant = NULL, $without_questions = false)
     {
-        global $egEasyTestsEasyQuestionCompl, $egEasyTestsHardQuestionCompl;
-        $style = '';
-        if ($complete) {
-            $percent = intval(100 * $correct / $complete);
-            $stat = wfMsg('easytests-complete-stats', $correct,
-                $complete, $percent);
-            if ($complete > 4) {
-                if ($percent >= $egEasyTestsEasyQuestionCompl)
-                    $style = ' style="color: white; background: #080;"';
-                elseif ($percent <= $egEasyTestsHardQuestionCompl)
-                    $style = ' style="color: white; background: #a00;"';
+        global $wgOut;
+        $dbr = wfGetDB(DB_SLAVE);
+
+        if (!empty($cond['id']))
+            $where = array('test_id' => $cond['id']);
+        elseif (!empty($cond['name'])) {
+            if ($cond['name'] instanceof Title)
+                $cond['name'] = $cond['name']->getText();
+            else
+                $cond['name'] = str_replace('_', ' ', $cond['name']);
+            $where = array('test_page_title' => $cond['name']);
+        }
+        $result = $dbr->select('et_test', '*', $where, __METHOD__);
+        $test = (array)$dbr->fetchObject($result);
+        $dbr->freeResult($result);
+
+        if (!$test)
+            return NULL;
+
+        $id = $test['test_id'];
+
+        // decode entities inside test_name as it is used inside HTML <title>
+        $test['test_name'] = html_entity_decode($test['test_name']);
+
+        // default OK%
+        if (!isset($test['ok_percent']) || $test['ok_percent'] <= 0)
+            $test['ok_percent'] = self::DEFAULT_OK_PERCENT;
+
+        // do not load questions if $without_questions == true
+        if ($without_questions)
+            return $test;
+
+        if ($variant) {
+            $variant = @unserialize($variant);
+            if (!is_array($variant))
+                $variant = NULL;
+            else {
+                $qhashes = array();
+                foreach ($variant as $question)
+                    $qhashes[] = $question[0];
             }
-            if ($style)
-                $stat = '&nbsp;' . $stat . '&nbsp;';
-        } else
-            $stat = wfMsg('easytests-no-complete-stats');
-        $stat = '<span class="editsection"' . $style . '>' . $stat . '</span>';
-        return $stat;
+        }
+
+        $fields = 'et_question.*, IFNULL(COUNT(cs_correct),0) tries, IFNULL(SUM(cs_correct),0) correct_tries';
+        $tables = array('et_question', 'et_choice_stats', 'et_question_test');
+        $where = array();
+        $options = array('GROUP BY' => 'qn_hash', 'ORDER BY' => 'qt_num');
+        $joins = array(
+            'et_choice_stats' => array('LEFT JOIN', array('cs_question_hash=qn_hash')),
+            'et_question_test' => array('INNER JOIN', array('qt_question_hash=qn_hash', 'qt_test_id' => $id)),
+        );
+
+        if ($variant) {
+            /* Select questions with known hashes for loading a specific variant.
+               This is needed because quiz set of questions can change over time,
+               but we want to always display the known variant. */
+            $where['qn_hash'] = $qhashes;
+            $joins['et_question_test'][0] = 'LEFT JOIN';
+        }
+
+        /* Read questions: */
+        $result = $dbr->select($tables, $fields, $where, __METHOD__, $options, $joins);
+        if ($dbr->numRows($result) <= 0)
+            return NULL;
+
+        $rows = array();
+        while ($question = $dbr->fetchObject($result)) {
+            $question = (array)$question;
+            if (!$question['correct_tries'])
+                $question['correct_tries'] = 0;
+            if (!$question['tries'])
+                $question['tries'] = 0;
+
+            if (!$variant && $test['test_autofilter_min_tries'] > 0 &&
+                $question['tries'] >= $test['test_autofilter_min_tries'] &&
+                $question['correct_tries'] / $question['tries'] >= $test['test_autofilter_success_percent'] / 100.0
+            ) {
+                /* Statistics tells us this question is too simple, skip it */
+                wfDebug(__CLASS__ . ': Skipping ' . $question['qn_hash'] . ', because correct percent = ' . $question['correct_tries'] . '/' . $question['tries'] . ' >= ' . $test['test_autofilter_success_percent'] . "%\n");
+                continue;
+            }
+            $question['choices'] = array();
+            $question['correct_count'] = 0;
+            $rows[$question['qn_hash']] = $question;
+        }
+
+        /* Optionally shuffle and limit questions */
+        if (!$variant && ($test['test_shuffle_questions'] || $test['test_limit_questions'])) {
+            $new = $rows;
+            if ($test['test_shuffle_questions'])
+                shuffle($new);
+            if ($test['test_limit_questions'])
+                array_splice($new, $test['test_limit_questions']);
+            $rows = array();
+            foreach ($new as $question)
+                $rows[$question['qn_hash']] = $question;
+        } elseif ($variant) {
+            $new = array();
+            foreach ($variant as $question) {
+                if ($rows[$question[0]]) {
+                    $rows[$question[0]]['ch_order'] = $question[1];
+                    $new[$question[0]] = &$rows[$question[0]];
+                }
+            }
+            $rows = $new;
+        }
+
+        /* Read choices: */
+        if ($rows) {
+            $result = $dbr->select(
+                'et_choice', '*', array('ch_question_hash' => array_keys($rows)),
+                __METHOD__, array('ORDER BY' => 'ch_question_hash, ch_num')
+            );
+            $question = NULL;
+            while ($choice = $dbr->fetchObject($result)) {
+                $choice = (array)$choice;
+                if (!$question) {
+                    $question = &$rows[$choice['ch_question_hash']];
+                } elseif ($question['qn_hash'] != $choice['ch_question_hash']) {
+                    if (!self::finalizeQuestionRow($question, $variant && true, $test['test_shuffle_choices'])) {
+                        unset($rows[$question['qn_hash']]);
+                    }
+                    $question = &$rows[$choice['ch_question_hash']];
+                }
+                $question['choiceByNum'][$choice['ch_num']] = $choice;
+                $question['choices'][] = &$question['choiceByNum'][$choice['ch_num']];
+                if ($choice['ch_correct']) {
+                    $question['correct_count']++;
+                    $question['correct_choices'][] = &$question['choiceByNum'][$choice['ch_num']];
+                }
+            }
+            if (!self::finalizeQuestionRow($question, $variant && true, $test['test_shuffle_choices']))
+                unset($rows[$question['qn_hash']]);
+            unset($question);
+            $dbr->freeResult($result);
+        }
+
+        /* Finally, build question array for the test */
+        $test['questions'] = array();
+        foreach ($rows as $question) {
+            $test['questionByHash'][$question['qn_hash']] = $question;
+            $test['questions'][] = &$test['questionByHash'][$question['qn_hash']];
+        }
+
+        // a variant ID is computed using hashes of selected questions and sequences of their answers
+        $variant = array();
+        foreach ($test['questions'] as $question) {
+            $v = array($question['qn_hash']);
+            foreach ($question['choices'] as $c)
+                $v[1][] = $c['ch_num'];
+            $variant[] = $v;
+        }
+        $test['variant_hash'] = serialize($variant);
+        $test['variant_hash_crc32'] = sprintf("%u", crc32($test['variant_hash']));
+        $test['variant_hash_md5'] = md5($test['variant_hash']);
+
+        $test['random_correct'] = 0;
+        $test['max_score'] = 0;
+        foreach ($test['questions'] as $question) {
+            // correct answers count for random selection
+            $test['random_correct'] += $question['correct_count'] / count($question['choices']);
+            // maximum total score
+            $test['max_score'] += $question['score_correct'];
+        }
+
+        return $test;
     }
 
-    // Display quiz question statistics near editsection link
+    /** Question must have at least 1 correct and 1 incorrect choice
+     * @param $question
+     * @param $var
+     * @param int $shuffle
+     * @return bool
+     */
+    static function finalizeQuestionRow(&$question, $var, $shuffle = 0)
+    {
+        $hash = $question['qn_hash'];
+        $hard_question = $question['qn_type'] == 'order' ? true : false;
+
+        if (!$var && !count($question['choices'])) {
+            /* No choices defined for this question, skip it */
+            wfDebug(__CLASS__ . ": Skipping $hash, no choices!\n");
+        } elseif (!$var && $question['correct_count'] <= 0) {
+            /* No correct choices defined for this question, skip it */
+            wfDebug(__CLASS__ . ": Skipping $hash, no correct choices!\n");
+        } else {
+            if (isset($question['ch_order'])) {
+                /* Reorder choices according to saved variant */
+                $nc = array();
+                foreach ($question['ch_order'] as $num) {
+                    $nc[] = &$question['choiceByNum'][$num];
+                }
+                $question['choices'] = $nc;
+                unset($question['ch_order']);
+            } elseif ($shuffle or $hard_question) {
+                /* Or else optionally shuffle choices */
+                shuffle($question['choices']);
+            }
+            //TODO: refactor score calculating
+            /* Calculate scores */
+            if ($question['correct_count']) {
+                // add 1/n for correct answers
+                $question['score_correct'] = 1/$question['correct_count'];
+//                $question['score_correct'] = 1;
+                // subtract 1/(m-n) for incorrect answers, so universal mean would be 0
+                $question['score_incorrect'] = $question['correct_count'] < count($question['choices']) ? -$question['score_correct'] / (count($question['choices']) - $question['correct_count']) : 0;
+            }
+            foreach ($question['choices'] as $i => &$c) {
+                $c['index'] = $i + 1;
+            }
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Identical to Xml::element, but does no htmlspecialchars() on $contents
+     */
+    static function xelement($element, $attribs = null, $contents = '', $allowShortTag = true)
+    {
+        if (is_null($contents))
+            return Xml::openElement($element, $attribs);
+        elseif ($contents == '')
+            return Xml::element($element, $attribs, $contents, $allowShortTag);
+        return Xml::openElement($element, $attribs) . $contents . Xml::closeElement($element);
+    }
+
+    /**
+     * Display quiz question statistics near editsection link
+     */
     static function quizQuestionInfo($title, $section, &$result)
     {
         $k = $title->getPrefixedDBkey();
@@ -127,64 +353,32 @@ class EasyTestsPage extends SpecialPage
         }
     }
 
-    /* Identical to Xml::element, but does no htmlspecialchars() on $contents */
-    static function xelement($element, $attribs = null, $contents = '', $allowShortTag = true)
-    {
-        if (is_null($contents))
-            return Xml::openElement($element, $attribs);
-        elseif ($contents == '')
-            return Xml::element($element, $attribs, $contents, $allowShortTag);
-        return Xml::openElement($element, $attribs) . $contents . Xml::closeElement($element);
-    }
-
     /**
-     * Methods used on special page
+     * Get HTML for one question statistics message
      */
-
-    /* Constructor */
-    function __construct()
+    static function questionStatsHtml($correct, $complete)
     {
-        global $IP, $wgScriptPath, $wgUser, $wgParser, $wgEmergencyContact;
-        parent::__construct('EasyTests');
+        global $egEasyTestsEasyQuestionCompl, $egEasyTestsHardQuestionCompl;
+        $style = '';
+        if ($complete) {
+            $percent = intval(100 * $correct / $complete);
+            $stat = wfMsg('easytests-complete-stats', $correct,
+                $complete, $percent);
+            if ($complete > 4) {
+                if ($percent >= $egEasyTestsEasyQuestionCompl)
+                    $style = ' style="color: white; background: #080;"';
+                elseif ($percent <= $egEasyTestsHardQuestionCompl)
+                    $style = ' style="color: white; background: #a00;"';
+            }
+            if ($style)
+                $stat = '&nbsp;' . $stat . '&nbsp;';
+        } else
+            $stat = wfMsg('easytests-no-complete-stats');
+        $stat = '<span class="editsection"' . $style . '>' . $stat . '</span>';
+        return $stat;
     }
 
-    /**
-     * buildOptionsArray
-     *
-     * @param $choices
-     * @return string
-     */
-    private static function buildOptionsArray($choices)
-    {
-        //@TODO: build options for selectbox
-        $options_arr = '';
-        foreach($choices as $key => $value) {
-            $options_arr = Xml::element('option', array(
-//                'value'=>
-            ));
-        }
-        return $options_arr;
-    }
-
-    /* Check if the user is an administrator for the test $name */
-    static function isAdminForTest($name)
-    {
-        if (self::$is_adm === NULL)
-            self::$is_adm = EasyTests::isTestAdmin();
-        if (self::$is_adm)
-            return true;
-        if ($name || !is_object($name) && strlen($name)) {
-            if (is_object($name))
-                $title = $name;
-            else
-                $title = Title::newFromText($name, NS_EATEST);
-            if ($title && $title->exists() && $title->userCan('read'))
-                return true;
-        }
-        return false;
-    }
-
-    /* SPECIAL PAGE ENTRY POINT */
+    /** SPECIAL PAGE ENTRY POINT */
     function execute($par = null)
     {
         global $wgOut, $wgRequest, $wgTitle, $wgLang, $wgServer, $wgScriptPath, $wgUser;
@@ -280,411 +474,220 @@ class EasyTestsPage extends SpecialPage
             self::showTest($test, $ticket, $args);
     }
 
-    /* Return HTML content for "Please select test to review results" form */
-    static function getSelectTestForReviewForm($args)
+    /**
+     * Check if the user is an administrator for the test $name
+     */
+    static function isAdminForTest($name)
     {
-        global $wgTitle;
-        $form = '';
-        $form .= wfMsg('easytests-quiz') . ': ';
-        $name = isset($args['quiz_name']) ? $args['quiz_name'] : '';
-        $form .= self::xelement('input', array('type' => 'text', 'name' => 'quiz_name', 'value' => $name)) . ' ';
-        $form .= Xml::submitButton(wfMsg('easytests-select-tickets'));
-        $form = self::xelement('form', array('action' => $wgTitle->getLocalUrl(array('mode' => 'review')), 'method' => 'POST'), $form);
-        return $form;
-    }
-
-    /* Question must have at least 1 correct and 1 incorrect choice */
-    static function finalizeQuestionRow(&$q, $var, $shuffle)
-    {
-        $hash = $q['qn_hash'];
-        if (!$var && !count($q['choices'])) {
-            /* No choices defined for this question, skip it */
-            wfDebug(__CLASS__ . ": Skipping $hash, no choices!\n");
-        } elseif (!$var && $q['correct_count'] <= 0) {
-            /* No correct choices defined for this question, skip it */
-            wfDebug(__CLASS__ . ": Skipping $hash, no correct choices!\n");
-        } else {
-            if (isset($q['ch_order'])) {
-                /* Reorder choices according to saved variant */
-                $nc = array();
-                foreach ($q['ch_order'] as $num)
-                    $nc[] = &$q['choiceByNum'][$num];
-                $q['choices'] = $nc;
-                unset($q['ch_order']);
-            } elseif ($shuffle) {
-                /* Or else optionally shuffle choices */
-                shuffle($q['choices']);
-            }
-            /* Calculate scores */
-            if ($q['correct_count']) {
-                // add 1/n for correct answers
-                $q['score_correct'] = 1;
-                // subtract 1/(m-n) for incorrect answers, so universal mean would be 0
-                $q['score_incorrect'] = $q['correct_count'] < count($q['choices']) ? -$q['correct_count'] / (count($q['choices']) - $q['correct_count']) : 0;
-            }
-            foreach ($q['choices'] as $i => &$c)
-                $c['index'] = $i + 1;
+        if (self::$is_adm === NULL)
+            self::$is_adm = EasyTests::isTestAdmin();
+        if (self::$is_adm)
             return true;
+        if ($name || !is_object($name) && strlen($name)) {
+            if (is_object($name))
+                $title = $name;
+            else
+                $title = Title::newFromText($name, NS_EATEST);
+            if ($title && $title->exists() && $title->userCan('read'))
+                return true;
         }
         return false;
     }
 
-    /**
-     * Load a test from database. Optionally shuffle/limit questions and answers,
-     * compute variant ID (sequence hash) and scores.
-     * $cond = array('id' => int $testId)
-     * or $cond = array('name' => string $testName)
-     * or $cond = array('name' => Title $testTitle)
-     */
-    static function loadTest($cond, $variant = NULL, $without_questions = false)
+    /** Check mode: check selected choices if not already checked,
+     * display results and completion certificate */
+    function checkTest($args)
     {
-        global $wgOut;
-        $dbr = wfGetDB(DB_SLAVE);
+        global $wgOut, $wgTitle, $wgUser;
 
-        if (!empty($cond['id']))
-            $where = array('test_id' => $cond['id']);
-        elseif (!empty($cond['name'])) {
-            if ($cond['name'] instanceof Title)
-                $cond['name'] = $cond['name']->getText();
-            else
-                $cond['name'] = str_replace('_', ' ', $cond['name']);
-            $where = array('test_page_title' => $cond['name']);
-        }
-        $result = $dbr->select('et_test', '*', $where, __METHOD__);
-        $test = $dbr->fetchRow($result);
-        $dbr->freeResult($result);
-
-        if (!$test)
-            return NULL;
-
-        $id = $test['test_id'];
-
-        // decode entities inside test_name as it is used inside HTML <title>
-        $test['test_name'] = html_entity_decode($test['test_name']);
-
-        // default OK%
-        if (!isset($test['ok_percent']) || $test['ok_percent'] <= 0)
-            $test['ok_percent'] = self::DEFAULT_OK_PERCENT;
-
-        // do not load questions if $without_questions == true
-        if ($without_questions)
-            return $test;
-
-        if ($variant) {
-            $variant = @unserialize($variant);
-            if (!is_array($variant))
-                $variant = NULL;
-            else {
-                $qhashes = array();
-                foreach ($variant as $q)
-                    $qhashes[] = $q[0];
+        $ticket = self::loadTicket($args['ticket_id'], $args['ticket_key']);
+        if (!$ticket) {
+            if ($args['id']) {
+                $test = self::loadTest(array('id' => $args['id']));
+                $name = $test['test_name'];
+                $href = $wgTitle->getFullUrl(array('id' => $test['test_id']));
             }
+            $wgOut->showErrorPage('easytests-check-no-ticket-title', 'easytests-check-no-ticket-text', array($name, $href));
+            return;
         }
 
-        $fields = 'et_question.*, IFNULL(COUNT(cs_correct),0) tries, IFNULL(SUM(cs_correct),0) correct_tries';
-        $tables = array('et_question', 'et_choice_stats', 'et_question_test');
-        $where = array();
-        $options = array('GROUP BY' => 'qn_hash', 'ORDER BY' => 'qt_num');
-        $joins = array(
-            'et_choice_stats' => array('LEFT JOIN', array('cs_question_hash=qn_hash')),
-            'et_question_test' => array('INNER JOIN', array('qt_question_hash=qn_hash', 'qt_test_id' => $id)),
+        $test = self::loadTest(array('id' => $ticket['tk_test_id']), $ticket['tk_variant']);
+        $testresult = self::checkOrLoadResult($ticket, $test, $args);
+        if (!$testresult) {
+            // checkOrLoadResult had shown the detail form - user must fill in additional fields
+            return;
+        }
+
+        $html = '';
+        if ($testresult['seen']) {
+            $html .= wfMsg('easytests-variant-already-seen') . ' ';
+        }
+        $href = $wgTitle->getFullUrl(array('id' => $test['test_id']));
+        if (self::isAdminForTest($test['test_id'])) {
+            $html .= wfMsg('easytests-try-another', $href);
+        }
+
+        if ($test['test_intro']) {
+            $html .= self::xelement('div', array('class' => 'easytests-intro easytests-intro-finish'), $test['test_intro']);
+        }
+
+        $f = self::formatTicket($ticket);
+        $html .= wfMsg('easytests-ticket-details',
+            $f['name'], $f['start'], $f['end'], $f['duration']
         );
 
-        if ($variant) {
-            /* Select questions with known hashes for loading a specific variant.
-               This is needed because quiz set of questions can change over time,
-               but we want to always display the known variant. */
-            $where['qn_hash'] = $qhashes;
-            $joins['et_question_test'][0] = 'LEFT JOIN';
-        }
-
-        /* Read questions: */
-        $result = $dbr->select($tables, $fields, $where, __METHOD__, $options, $joins);
-        if ($dbr->numRows($result) <= 0)
-            return NULL;
-
-        $rows = array();
-        while ($q = $dbr->fetchRow($result)) {
-            if (!$q['correct_tries'])
-                $q['correct_tries'] = 0;
-            if (!$q['tries'])
-                $q['tries'] = 0;
-
-            if (!$variant && $test['test_autofilter_min_tries'] > 0 &&
-                $q['tries'] >= $test['test_autofilter_min_tries'] &&
-                $q['correct_tries'] / $q['tries'] >= $test['test_autofilter_success_percent'] / 100.0
-            ) {
-                /* Statistics tells us this question is too simple, skip it */
-                wfDebug(__CLASS__ . ': Skipping ' . $q['qn_hash'] . ', because correct percent = ' . $q['correct_tries'] . '/' . $q['tries'] . ' >= ' . $test['test_autofilter_success_percent'] . "%\n");
-                continue;
+        $is_adm = self::isAdminForTest($test['test_id']);
+        if ($is_adm) {
+            if ($ticket['tk_reviewed']) {
+                $html .= '<p>' . wfMsg('easytests-ticket-reviewed') . '</p>';
+            } else {
+                wfGetDB(DB_MASTER)->update(
+                    'et_ticket', array('tk_reviewed' => 1),
+                    array('tk_id' => $ticket['tk_id']), __METHOD__
+                );
             }
-            $q['choices'] = array();
-            $q['correct_count'] = 0;
-            $rows[$q['qn_hash']] = $q;
         }
 
-        /* Optionally shuffle and limit questions */
-        if (!$variant && ($test['test_shuffle_questions'] || $test['test_limit_questions'])) {
-            $new = $rows;
-            if ($test['test_shuffle_questions'])
-                shuffle($new);
-            if ($test['test_limit_questions'])
-                array_splice($new, $test['test_limit_questions']);
-            $rows = array();
-            foreach ($new as $q)
-                $rows[$q['qn_hash']] = $q;
-        } elseif ($variant) {
-            $new = array();
-            foreach ($variant as $q) {
-                if ($rows[$q[0]]) {
-                    $rows[$q[0]]['ch_order'] = $q[1];
-                    $new[$q[0]] = &$rows[$q[0]];
-                }
+        $detail = $ticket['tk_details'] ? json_decode($ticket['tk_details'], true) : array();
+        if ($detail) {
+            $html .= '<ul>';
+            foreach ($detail as $k => $v) {
+                $html .= '<li>' . htmlspecialchars($k) . ': ' . htmlspecialchars($v) . '</li>';
             }
-            $rows = $new;
+            $html .= '</ul>';
         }
 
-        /* Read choices: */
-        if ($rows) {
-            $result = $dbr->select(
-                'et_choice', '*', array('ch_question_hash' => array_keys($rows)),
-                __METHOD__, array('ORDER BY' => 'ch_question_hash, ch_num')
-            );
-            $q = NULL;
-            while ($choice = $dbr->fetchRow($result)) {
-                if (!$q) {
-                    $q = &$rows[$choice['ch_question_hash']];
-                } elseif ($q['qn_hash'] != $choice['ch_question_hash']) {
-                    if (!self::finalizeQuestionRow($q, $variant && true, $test['test_shuffle_choices']))
-                        unset($rows[$q['qn_hash']]);
-                    $q = &$rows[$choice['ch_question_hash']];
-                }
-                $q['choiceByNum'][$choice['ch_num']] = $choice;
-                $q['choices'][] = &$q['choiceByNum'][$choice['ch_num']];
-                if ($choice['ch_correct']) {
-                    $q['correct_count']++;
-                    $q['correct_choices'][] = &$q['choiceByNum'][$choice['ch_num']];
-                }
-            }
-            if (!self::finalizeQuestionRow($q, $variant && true, $test['test_shuffle_choices']))
-                unset($rows[$q['qn_hash']]);
-            unset($q);
-            $dbr->freeResult($result);
+        if ($is_adm) {
+            // Average result for admins
+            $html .= self::xelement('p', NULL, wfMsg('easytests-test-average', self::getAverage($test)));
         }
 
-        /* Finally, build question array for the test */
-        $test['questions'] = array();
-        foreach ($rows as $q) {
-            $test['questionByHash'][$q['qn_hash']] = $q;
-            $test['questions'][] = &$test['questionByHash'][$q['qn_hash']];
+        // Variant number
+        $html .= wfMsg('easytests-variant-msg', $test['variant_hash_crc32']);
+
+        // Result
+        $html .= $this->getResultHtml($ticket, $test, $testresult);
+
+        if ($testresult['passed'] && ($ticket['tk_displayname'] || $ticket['tk_user_id'])) {
+            $html .= Xml::element('hr', array('style' => 'clear: both'));
         }
 
-        // a variant ID is computed using hashes of selected questions and sequences of their answers
-        $variant = array();
-        foreach ($test['questions'] as $q) {
-            $v = array($q['qn_hash']);
-            foreach ($q['choices'] as $c)
-                $v[1][] = $c['ch_num'];
-            $variant[] = $v;
-        }
-        $test['variant_hash'] = serialize($variant);
-        $test['variant_hash_crc32'] = sprintf("%u", crc32($test['variant_hash']));
-        $test['variant_hash_md5'] = md5($test['variant_hash']);
-
-        $test['random_correct'] = 0;
-        $test['max_score'] = 0;
-        foreach ($test['questions'] as $q) {
-            // correct answers count for random selection
-            $test['random_correct'] += $q['correct_count'] / count($q['choices']);
-            // maximum total score
-            $test['max_score'] += $q['score_correct'];
+        /* Display answers also for links from result review table (showtut=1)
+           to users who are admins or have read access to quiz source */
+        if ($test['test_mode'] == 'TUTOR' || !empty($args['showtut']) && $is_adm) {
+            $html .= $this->getTutorHtml($ticket, $test, $testresult, $is_adm);
         }
 
-        return $test;
+        $wgOut->setPageTitle(wfMsg('easytests-check-pagetitle', $test['test_name']));
+        $wgOut->addHTML($html);
     }
 
-    // Get average correct count for the test
-    function getAverage($test)
+    /** Get ticket from the database */
+    static function loadTicket($id, $key)
     {
         $dbr = wfGetDB(DB_SLAVE);
-        $res = $dbr->query('SELECT AVG(a) a FROM (' . $dbr->selectSQLtext(
-                array('et_ticket', 'et_choice_stats'),
-                'SUM(cs_correct)/COUNT(cs_correct)*100 a',
-                array('tk_id=cs_ticket', 'tk_test_id' => $test['test_id']),
-                __METHOD__,
-                array('GROUP BY' => 'cs_ticket')
-            ) . ') t', __METHOD__);
-        $row = $res->fetchObject();
-        return round($row->a);
+        $result = $dbr->select('et_ticket', '*', array(
+            'tk_id' => $id,
+            'tk_key' => $key,
+        ), __FUNCTION__);
+        $ticket = (array)$dbr->fetchObject($result);
+        $dbr->freeResult($result);
+        return $ticket;
     }
 
-    /*************/
-    /* SHOW MODE */
-    /*************/
-
-    /* Get a table with question numbers linked to the appropriate questions */
-    static function getToc($n, $trues = false)
-    {
-        if ($n <= 0)
-            return '';
-        $s = '';
-        for ($k = 0; $k < $n;) {
-            $row = '';
-            for ($j = 0; $j < 10; $j++, $k++) {
-                $args = NULL;
-                if ($k >= $n)
-                    $text = '';
-                elseif ($trues && array_key_exists($k, $trues) && !$trues[$k]) {
-                    $text = $k + 1;
-                    $args = array('class' => 'easytests-noitem');
-                } else
-                    $text = self::xelement('a', array('href' => "#q$k"), $k + 1);
-                $row .= self::xelement('td', $args, $text);
-            }
-            $s .= self::xelement('tr', NULL, $row);
-        }
-        $s = self::xelement('table', array('class' => 'easytests-toc'), $s);
-        return $s;
-    }
-
-    /*
-        We will use it also in TUTOR mode to get question with choices.
-    */
-    static function getQuestionHtml($question, $qn_key, $inputs = false)
-    {
-        $html = '';
-        $html = self::xelement('div', array('class' => 'easytests-question'), $question['qn_text']);
-        $choices = '';
-        switch ($question['qn_type']) {
-            case 'free-text':
-                if ($inputs) {
-                    $html .= wfMsg('easytests-freetext') . ' ' . self::xelement('input', array('name' => "a[$qn_key]", 'type' => 'text'));
-                }
-                break;
-            case 'order':
-                // @TODO: build inputs
-                $options = self::buildOptionsArray($question['choices']);
-                foreach ($question['choices'] as $i => $choice) {
-                    $h = $choice['ch_text'] . '&nbsp;' . Xml::element('select', array(
-                            'name' => "a[$qn_key]",
-                        ), $options);
-
-                    $choices .= self::xelement('li', array('class' => 'easytests-choice'), $h);
-                }
-                $html .= self::xelement('ol', array('class' => 'easytests-choices'), $choices);
-                break;
-            case 'parallel':
-                // @TODO: build selectboxes
-                break;
-            default:
-                foreach ($question['choices'] as $i => $choice) {
-                    if ($inputs) {
-                        /*
-                         * If correct choices more than 1, build input with checkboxes
-                         */
-                        if ($question['correct_count'] > 1) {
-                            $h = Xml::element('input', array(
-                                    'name' => "a[$qn_key][]",
-                                    'type' => 'checkbox',
-                                    'value' => $i + 1,
-                                )) . '&nbsp;' . $choice['ch_text'];
-                        } else {
-                            /*
-                             * Question hashes and choice numbers are hidden from user.
-                             * They are taken from ticket during check.
-                             */
-                            $h = Xml::element('input', array(
-                                    'name' => "a[$qn_key]",
-                                    'type' => 'radio',
-                                    'value' => $i + 1,
-                                )) . '&nbsp;' . $choice['ch_text'];
-                        }
-                    } else {
-                        $h = $choice['ch_text'];
-                    }
-                    $choices .= self::xelement('li', array('class' => 'easytests-choice'), $h);
-                }
-                $html .= self::xelement('ol', array('class' => 'easytests-choices'), $choices);
-                break;
-        }
-        return $html;
-    }
-
-    /* Get HTML ordered list with questions, choices,
-       optionally radio-buttons for selecting them when $inputs is TRUE,
-       and optionally edit question section links when $editsection is TRUE. */
-    static function getQuestionList($questions, $inputs = false, $editsection = false)
-    {
-        $html = '';
-        foreach ($questions as $key => $question) {
-            $html .= Xml::element('hr');
-            $html .= self::xelement('a', array('name' => "q$key"), '', false);
-            $h = wfMsg('easytests-question', $key + 1);
-            if ($editsection)
-                $h .= $question['qn_editsection'];
-            $html .= self::xelement('h3', NULL, $h);
-
-            $html .= self::getQuestionHtml($question, $key, $inputs);
-        }
-        return $html;
-    }
-
-    /* Get javascript code for HH:MM:SS counter */
-    static function getCounterJs()
-    {
-        global $wgScriptPath;
-        $format = wfMsg('easytests-counter-format');
-        $already = wfMsg('easytests-refresh-to-retry');
-        return <<<EOT
-<script type="text/javascript">
-var BackColor = "white";
-var ForeColor = "navy";
-var CountActive = true;
-var CountStepper = 1;
-var LeadingZero = true;
-var DisplayFormat = "$format";
-var FinishMessage = "";
-$(window).unload(function() {
-    // Prevent fast unload to bfcache
-});
-$(window).load(function()
-{
-    if (document.getElementById('_submitted').value && confirm('$already'))
-    {
-        window.location.href = window.location.href;
-    }
-});
-</script>
-<script type="text/javascript" src="$wgScriptPath/extensions/EasyTests/js/countdown.js"></script>
-EOT;
-    }
-
-    /* Create a ticket and a secret key for testing, and remember the variant */
-    static function createTicket($test, $start)
+    /** Either check an unchecked ticket, or load results from the database
+     * if the ticket is already checked */
+    static function checkOrLoadResult(&$ticket, $test, $args)
     {
         global $wgUser;
-        $key = unpack('H*', urandom(16));
-        $key = $key[1];
-        $userid = $wgUser->getId();
-        if (!$userid)
-            $userid = NULL;
-        $dbw = wfGetDB(DB_MASTER);
-        global $wgRequest;
-        $ticket = array(
-            'tk_id' => $dbw->nextSequenceValue('et_ticket_tk_id_seq'),
-            'tk_key' => $key,
-            'tk_start_time' => $start,
-            'tk_end_time' => NULL,
-            'tk_displayname' => NULL,
-            'tk_user_id' => $userid,
-            'tk_user_text' => $wgUser->getName(),
-            'tk_user_ip' => $wgRequest->getIP(),
-            'tk_test_id' => $test['test_id'],
-            'tk_variant' => $test['variant_hash'],
+        $testresult = array(
+            'correct_count' => 0,
+            'score' => 0,
         );
-        $dbw->insert('et_ticket', $ticket, __METHOD__);
-        $ticket['tk_id'] = $dbw->insertId();
-        return $ticket;
+
+        $updated = false;
+        if ($ticket['tk_end_time']) {
+            /* Ticket already checked, load answers from database */
+            $testresult['answers'] = self::loadAnswers($ticket['tk_id']);
+            $testresult['details'] = $ticket['tk_details'] ? json_decode($ticket['tk_details'], true) : array();
+            $testresult['seen'] = true;
+        } else {
+            /* Else check POSTed answers */
+            $empty = trim(@$_REQUEST['prompt']) === '';
+            $formdef = self::formDef($test);
+            $values = array();
+            if ($formdef) {
+                // Check for empty form fields
+                foreach ($formdef as $i => $field) {
+                    if (!isset($field['type'])) {
+                        $field['type'] = false;
+                    }
+                }
+                if ($empty) {
+                    // Ask user to fill fields if some of them are empty
+                    self::showTest($test, $ticket, $args, true);
+                    return false;
+                }
+            }
+            $testresult['details'] = $values;
+            $testresult['answers'] = self::checkAnswers($test, $ticket);
+            $testresult['seen'] = false;
+            /* Need to send mail and update ticket in the DB */
+            $updated = true;
+        }
+
+        /* Calculate scores */
+        self::calculateScores($testresult, $test);
+
+        if ($updated) {
+            /* Update ticket */
+            $userid = $wgUser->getId();
+            global $wgRequest;
+            if (!$userid)
+                $userid = NULL;
+            $update = array(
+                'tk_end_time' => wfTimestampNow(),
+                'tk_displayname' => $args['prompt'],
+                'tk_user_id' => $userid,
+                'tk_user_text' => $wgUser->getName(),
+                'tk_user_ip' => $wgRequest->getIP(),
+                /* Testing result to be shown in the table.
+                   Nothing relies on these values. */
+                'tk_score' => $testresult['score'],
+                'tk_score_percent' => $testresult['score_percent'],
+                'tk_correct' => $testresult['correct_count'],
+                'tk_correct_percent' => $testresult['correct_percent'],
+                'tk_pass' => $testresult['passed'] ? 1 : 0,
+                'tk_details' => $testresult['details'] ? json_encode($values, JSON_UNESCAPED_UNICODE) : '',
+            );
+            $ticket = array_merge($ticket, $update);
+            $dbw = wfGetDB(DB_MASTER);
+            $dbw->update('et_ticket', $update, array('tk_id' => $ticket['tk_id']), __METHOD__);
+            /* Send mail with test results to administrator(s) */
+            self::sendMail($ticket, $test, $testresult);
+        }
+
+        return $testresult;
+    }
+
+    /**
+     * ***********
+     * CHECK MODE
+     * ***********
+     * Load saved answer numbers from database
+     */
+    static function loadAnswers($ticket_id)
+    {
+        $answers = array();
+        $dbr = wfGetDB(DB_SLAVE);
+        $result = $dbr->select('et_choice_stats', '*', array(
+            'cs_ticket' => $ticket_id,
+        ), __FUNCTION__);
+        while ($row = $dbr->fetchObject($result)) {
+            $answers[$row['cs_question_hash']] = (array)$row;
+        }
+        $dbr->freeResult($result);
+        return $answers;
     }
 
     static function formDef($test)
@@ -705,22 +708,7 @@ EOT;
         return $formdef;
     }
 
-    static function showTicket($test)
-    {
-        global $wgOut, $wgTitle;
-        $ticket = self::createTicket($test, NULL);
-        $link = $wgTitle->getFullUrl(array(
-            'id' => $test['test_id'],
-            'ticket_id' => $ticket['tk_id'],
-            'ticket_key' => $ticket['tk_key'],
-        ));
-        $wgOut->setPageTitle(wfMsg('easytests-pagetitle', $test['test_name']));
-        $wgOut->addHTML(
-            wfMsg('easytests-ticket-link') . ': <a href="' . $link . '">' . htmlspecialchars($link) . '</a>'
-        );
-    }
-
-    /* Display main form for testing */
+    /** Display main form for testing */
     static function showTest($test, $ticket, $args, $empty = false)
     {
         global $wgTitle, $wgOut;
@@ -816,122 +804,193 @@ EOT;
         $wgOut->addHTML($html);
     }
 
-    /**************/
-    /* PRINT MODE */
-    /**************/
-
-    /* Display a "dump" for the test:
-     * - all questions without information about correct answers
-     * - a printable empty table for filling it with answer numbers
-     * - a table similar to the previous, but filled with correct answer numbers and question labels ("check-list")
-     *   (question label is intended to briefly describe question subject)
-     * Check list is shown only to test administrators and users who can read the quiz source article.
-     * Note that read access to articles included into the quiz are not checked.
-     * CSS page-break styles are specified so you can print this page.
-     */
-    static function printTest($test, $args, $answers = NULL)
+    /** Create a ticket and a secret key for testing, and remember the variant */
+    static function createTicket($test, $start)
     {
-        global $wgOut;
+        global $wgUser;
+        $key = unpack('H*', urandom(16));
+        $key = $key[1];
+        $userid = $wgUser->getId();
+        if (!$userid)
+            $userid = NULL;
+        $dbw = wfGetDB(DB_MASTER);
+        global $wgRequest;
+        $ticket = array(
+            'tk_id' => $dbw->nextSequenceValue('et_ticket_tk_id_seq'),
+            'tk_key' => $key,
+            'tk_start_time' => $start,
+            'tk_end_time' => NULL,
+            'tk_displayname' => NULL,
+            'tk_user_id' => $userid,
+            'tk_user_text' => $wgUser->getName(),
+            'tk_user_ip' => $wgRequest->getIP(),
+            'tk_test_id' => $test['test_id'],
+            'tk_variant' => $test['variant_hash'],
+        );
+        $dbw->insert('et_ticket', $ticket, __METHOD__);
+        $ticket['tk_id'] = $dbw->insertId();
+        return $ticket;
+    }
+
+    /** Get HTML ordered list with questions, choices,
+     * optionally radio-buttons for selecting them when $inputs is TRUE,
+     * and optionally edit question section links when $editsection is TRUE. */
+    static function getQuestionList($questions, $inputs = false, $editsection = false)
+    {
         $html = '';
+        foreach ($questions as $key => $question) {
+            $html .= Xml::element('hr');
+            $html .= self::xelement('a', array('name' => "q$key"), '', false);
+            $h = wfMsg('easytests-question', $key + 1);
+            if ($editsection)
+                $h .= $question['qn_editsection'];
+            $html .= self::xelement('h3', NULL, $h);
 
-        $is_adm = self::isAdminForTest($test['test_id']);
-
-        /* TestInfo */
-        $ti = wfMsg('easytests-variant-msg', $test['variant_hash_crc32']);
-        if ($test['test_intro']) {
-            $ti = self::xelement('div', array('class' => 'easytests-intro'), $test['test_intro']) . $ti;
+            $html .= self::getQuestionHtml($question, $key, $inputs);
         }
-
-        /* Display question list (with editsection links for admins) */
-        $html .= self::xelement('h2', NULL, wfMsg('easytests-question-sheet'));
-        $html .= $ti;
-        $html .= self::getQuestionList($test['questions'], false, !empty($args['edit']) && $is_adm);
-
-        /* Display questionnaire */
-        $html .= Xml::element('hr', array('style' => 'page-break-after: always'), '');
-        $html .= self::xelement('h2', NULL, wfMsg('easytests-test-sheet'));
-        $html .= $ti;
-        $html .= self::getCheckList($test, $args, false);
-
-        /* Display questionnaire filled with user's answers */
-        if ($answers !== NULL) {
-            $html .= Xml::element('hr', array('style' => 'page-break-after: always'), '');
-            $html .= self::xelement('h2', NULL, wfMsg('easytests-user-answers'));
-            $html .= wfMsg('easytests-variant-msg', $test['variant_hash_crc32']);
-            $html .= self::getCheckList($test, $args, false, $answers);
-        }
-
-        if ($is_adm) {
-            /* Display check-list to users who can read source article */
-            $html .= self::xelement('h2', array('style' => 'page-break-before: always'), wfMsg('easytests-answer-sheet'));
-            $html .= $ti;
-            $html .= self::getCheckList($test, $args, true);
-        }
-
-        $wgOut->setPageTitle(wfMsg('easytests-print-pagetitle', $test['test_name']));
-        $wgOut->addHTML($html);
+        return $html;
     }
 
-    /* Display a table with question numbers, correct answers, statistics and labels when $checklist is TRUE
-       Display a table with question numbers and two blank columns - "answer" and "remark" when $checklist is FALSE
-       Display a table with question numbers and user answers when $answers is specified */
-    static function getCheckList($test, $args, $checklist = false, $answers = NULL)
+    /**
+     * We will use it also in TUTOR mode to get question with choices.
+     */
+    static function getQuestionHtml($question, $qn_key, $inputs = false)
     {
-        $table = '';
-        $table .= self::xelement('th', array('class' => 'easytests-tn'), wfMsg('easytests-table-number'));
-        $table .= self::xelement('th', NULL, wfMsg('easytests-table-answer'));
-        if ($checklist) {
-            $table .= self::xelement('th', NULL, wfMsg('easytests-table-stats'));
-            $table .= self::xelement('th', NULL, wfMsg('easytests-table-label'));
-        } else
-            $table .= self::xelement('th', NULL, wfMsg('easytests-table-remark'));
-        foreach ($test['questions'] as $k => $q) {
-            $row = '<td>' . ($k + 1) . '</td>';
-            if ($checklist) {
-                /* build a list of correct choice indexes in the shuffled array (or texts for free-text questions) */
-                $correct_indexes = array();
-                foreach ($q['correct_choices'] as $c) {
-                    $correct_indexes[] = $q['correct_count'] < count($q['choices']) ? $c['index'] : $c['ch_text'];
+        $html = '';
+        $html = self::xelement('div', array('class' => 'easytests-question'), $question['qn_text']);
+        $choices = '';
+        switch ($question['qn_type']) {
+            case 'free-text':
+                if ($inputs) {
+                    $html .= wfMsg('easytests-freetext') . ' ' . self::xelement('input', array('name' => "a[$qn_key]", 'type' => 'text'));
                 }
-                $row .= '<td>' . htmlspecialchars(implode(', ', $correct_indexes)) . '</td>';
-                if ($q['tries']) {
-                    $row .= '<td>' . $q['correct_tries'] . '/' . $q['tries'] .
-                        ' ≈ ' . round($q['correct_tries'] * 100.0 / $q['tries']) . '%</td>';
-                } else
-                    $row .= '<td></td>';
-                $row .= '<td>' . $q['qn_label'] . '</td>';
-            } elseif ($answers && !empty($answers[$q['qn_hash']])) {
-                $ans = $answers[$q['qn_hash']];
-                $ch = !empty($ans['cs_choice_num']) ? $q['choiceByNum'][$ans['cs_choice_num']] : NULL;
-                $row .= '<td>' . ($ch ? $ch['index'] : $ans['cs_text']) . '</td><td' . ($ans['cs_correct'] ? '' : ' class="easytests-fail-bd"') . '>' .
-                    wfMsg('easytests-is-' . ($ans['cs_correct'] ? 'correct' : 'incorrect')) . '</td>';
-            } else
-                $row .= '<td></td><td></td>';
-            $table .= '<tr>' . $row . '</tr>';
+                break;
+            case 'order':
+                $options = self::buildOptionsArray($question['choices']);
+                foreach ($question['choices'] as $i => $choice) {
+                    $h = $choice['ch_text'] . '&nbsp;' . self::xelement('select', array(
+                            'name' => "a[$qn_key]",
+                        ), $options);
+
+                    $choices .= self::xelement('li', array('class' => 'easytests-choice'), $h);
+                }
+                $html .= self::xelement('ol', array('class' => 'easytests-choices'), $choices);
+                break;
+            case 'parallel':
+                // TODO: build selectboxes
+                break;
+            default:
+                foreach ($question['choices'] as $i => $choice) {
+                    if ($inputs) {
+                        /*
+                         * If correct choices more than 1, build input with checkboxes
+                         */
+                        if ($question['correct_count'] > 1) {
+                            $h = Xml::element('input', array(
+                                    'name' => "a[$qn_key][]",
+                                    'type' => 'checkbox',
+                                    'value' => $i + 1,
+                                )) . '&nbsp;' . $choice['ch_text'];
+                        } else {
+                            /*
+                             * Question hashes and choice numbers are hidden from user.
+                             * They are taken from ticket during check.
+                             */
+                            $h = Xml::element('input', array(
+                                    'name' => "a[$qn_key]",
+                                    'type' => 'radio',
+                                    'value' => $i + 1,
+                                )) . '&nbsp;' . $choice['ch_text'];
+                        }
+                    } else {
+                        $h = $choice['ch_text'];
+                    }
+                    $choices .= self::xelement('li', array('class' => 'easytests-choice'), $h);
+                }
+                $html .= self::xelement('ol', array('class' => 'easytests-choices'), $choices);
+                break;
         }
-        $table = self::xelement('table', array('class' => $checklist ? 'easytests-checklist' : 'easytests-questionnaire'), $table);
-        return $table;
+        return $html;
     }
 
-    /**************/
-    /* CHECK MODE */
-    /**************/
-
-    /* Load saved answer numbers from database */
-    static function loadAnswers($ticket_id)
+    /**
+     * buildOptionsArray
+     *
+     * @param $choices
+     * @return string
+     */
+    private static function buildOptionsArray($choices)
     {
-        $answers = array();
-        $dbr = wfGetDB(DB_SLAVE);
-        $result = $dbr->select('et_choice_stats', '*', array(
-            'cs_ticket' => $ticket_id,
-        ), __FUNCTION__);
-        while ($row = $dbr->fetchRow($result))
-            $answers[$row['cs_question_hash']] = $row;
-        $dbr->freeResult($result);
-        return $answers;
+        $options_arr = '';
+        foreach ($choices as $key => $value) {
+            $options_arr .= Xml::element('option', array(
+                'value' => $key,
+            ), $key + 1);
+        }
+        return $options_arr;
     }
 
-    /* Load answers from POST data, save them into DB and return as the result */
+    /**
+     ************
+     * SHOW MODE
+     ************
+     * Get a table with question numbers linked to the appropriate questions
+     */
+    static function getToc($n, $trues = false)
+    {
+        if ($n <= 0)
+            return '';
+        $s = '';
+        for ($k = 0; $k < $n;) {
+            $row = '';
+            for ($j = 0; $j < 10; $j++, $k++) {
+                $args = NULL;
+                if ($k >= $n)
+                    $text = '';
+                elseif ($trues && array_key_exists($k, $trues) && !$trues[$k]) {
+                    $text = $k + 1;
+                    $args = array('class' => 'easytests-noitem');
+                } else
+                    $text = self::xelement('a', array('href' => "#q$k"), $k + 1);
+                $row .= self::xelement('td', $args, $text);
+            }
+            $s .= self::xelement('tr', NULL, $row);
+        }
+        $s = self::xelement('table', array('class' => 'easytests-toc'), $s);
+        return $s;
+    }
+
+    /** Get javascript code for HH:MM:SS counter */
+    static function getCounterJs()
+    {
+        global $wgScriptPath;
+        $format = wfMsg('easytests-counter-format');
+        $already = wfMsg('easytests-refresh-to-retry');
+        return <<<EOT
+<script type="text/javascript">
+var BackColor = "white";
+var ForeColor = "navy";
+var CountActive = true;
+var CountStepper = 1;
+var LeadingZero = true;
+var DisplayFormat = "$format";
+var FinishMessage = "";
+$(window).unload(function() {
+    // Prevent fast unload to bfcache
+});
+$(window).load(function()
+{
+    if (document.getElementById('_submitted').value && confirm('$already'))
+    {
+        window.location.href = window.location.href;
+    }
+});
+</script>
+<script type="text/javascript" src="$wgScriptPath/extensions/EasyTests/js/countdown.js"></script>
+EOT;
+    }
+
+    /** Load answers from POST data, save them into DB and return as the result */
     static function checkAnswers($test, $ticket)
     {
         $answers = array();
@@ -986,7 +1045,7 @@ EOT;
         return $answers;
     }
 
-    /* Calculate scores based on $testresult['answers'] ($hash => $num) */
+    /** Calculate scores based on $testresult['answers'] ($hash => $num) */
     static function calculateScores(&$testresult, &$test)
     {
         foreach ($testresult['answers'] as $hash => $row) {
@@ -999,103 +1058,23 @@ EOT;
         $testresult['passed'] = $testresult['score_percent'] >= $test['test_ok_percent'];
     }
 
-    /* Either check an unchecked ticket, or load results from the database
-       if the ticket is already checked */
-    static function checkOrLoadResult(&$ticket, $test, $args)
+    /** Send emails with test results to administrators */
+    static function sendMail($ticket, $test, $testresult)
     {
-        global $wgUser;
-        $testresult = array(
-            'correct_count' => 0,
-            'score' => 0,
-        );
-
-        $updated = false;
-        if ($ticket['tk_end_time']) {
-            /* Ticket already checked, load answers from database */
-            $testresult['answers'] = self::loadAnswers($ticket['tk_id']);
-            $testresult['details'] = $ticket['tk_details'] ? json_decode($ticket['tk_details'], true) : array();
-            $testresult['seen'] = true;
-        } else {
-            /* Else check POSTed answers */
-            $empty = trim(@$_REQUEST['prompt']) === '';
-            $formdef = self::formDef($test);
-            $values = array();
-            if ($formdef) {
-                // Check for empty form fields
-                foreach ($formdef as $i => $field) {
-                    if (!isset($field['type'])) {
-                        $field['type'] = false;
-                    }
-                }
-                if ($empty) {
-                    // Ask user to fill fields if some of them are empty
-                    self::showTest($test, $ticket, $args, true);
-                    return false;
-                }
+        global $egEasyTestsAdmins, $wgEmergencyContact;
+        $text = self::buildMailText($ticket, $test, $testresult);
+        $sender = new MailAddress($wgEmergencyContact);
+        foreach ($egEasyTestsAdmins as $admin) {
+            if (($user = User::newFromName($admin)) &&
+                ($user = $user->getEmail())
+            ) {
+                $to = new MailAddress($user);
+                $mailResult = UserMailer::send($to, $sender, "[Quiz] «" . $test['test_name'] . "» $ticket[tk_id] => $testresult[score_percent]%", $text);
             }
-            $testresult['details'] = $values;
-            $testresult['answers'] = self::checkAnswers($test, $ticket);
-            $testresult['seen'] = false;
-            /* Need to send mail and update ticket in the DB */
-            $updated = true;
         }
-
-        /* Calculate scores */
-        self::calculateScores($testresult, $test);
-
-        if ($updated) {
-            /* Update ticket */
-            $userid = $wgUser->getId();
-            global $wgRequest;
-            if (!$userid)
-                $userid = NULL;
-            $update = array(
-                'tk_end_time' => wfTimestampNow(),
-                'tk_displayname' => $args['prompt'],
-                'tk_user_id' => $userid,
-                'tk_user_text' => $wgUser->getName(),
-                'tk_user_ip' => $wgRequest->getIP(),
-                /* Testing result to be shown in the table.
-                   Nothing relies on these values. */
-                'tk_score' => $testresult['score'],
-                'tk_score_percent' => $testresult['score_percent'],
-                'tk_correct' => $testresult['correct_count'],
-                'tk_correct_percent' => $testresult['correct_percent'],
-                'tk_pass' => $testresult['passed'] ? 1 : 0,
-                'tk_details' => $testresult['details'] ? json_encode($values, JSON_UNESCAPED_UNICODE) : '',
-            );
-            $ticket = array_merge($ticket, $update);
-            $dbw = wfGetDB(DB_MASTER);
-            $dbw->update('et_ticket', $update, array('tk_id' => $ticket['tk_id']), __METHOD__);
-            /* Send mail with test results to administrator(s) */
-            self::sendMail($ticket, $test, $testresult);
-        }
-
-        return $testresult;
     }
 
-    /* Recalculate scores for a completed ticket */
-    static function recalcTicket(&$ticket)
-    {
-        if ($ticket['tk_end_time'] === NULL)
-            return;
-        $test = self::loadTest(array('id' => $ticket['tk_test_id']), $ticket['tk_variant']);
-        $testresult = self::checkOrLoadResult($ticket, $test, array());
-        $update = array(
-            /* Testing result to be shown in the table.
-               Nothing relies on these values. */
-            'tk_score' => $testresult['score'],
-            'tk_score_percent' => $testresult['score_percent'],
-            'tk_correct' => $testresult['correct_count'],
-            'tk_correct_percent' => $testresult['correct_percent'],
-            'tk_pass' => $testresult['passed'] ? 1 : 0,
-        );
-        $ticket = array_merge($ticket, $update);
-        $dbw = wfGetDB(DB_MASTER);
-        $dbw->update('et_ticket', $update, array('tk_id' => $ticket['tk_id']), __METHOD__);
-    }
-
-    /* Build email text */
+    /** Build email text */
     static function buildMailText($ticket, $test, $testresult)
     {
         $msg_r = wfMsg('easytests-right-answer');
@@ -1156,36 +1135,7 @@ EOT;
         return $text;
     }
 
-    /* Send emails with test results to administrators */
-    static function sendMail($ticket, $test, $testresult)
-    {
-        global $egEasyTestsAdmins, $wgEmergencyContact;
-        $text = self::buildMailText($ticket, $test, $testresult);
-        $sender = new MailAddress($wgEmergencyContact);
-        foreach ($egEasyTestsAdmins as $admin) {
-            if (($user = User::newFromName($admin)) &&
-                ($user = $user->getEmail())
-            ) {
-                $to = new MailAddress($user);
-                $mailResult = UserMailer::send($to, $sender, "[Quiz] «" . $test['test_name'] . "» $ticket[tk_id] => $testresult[score_percent]%", $text);
-            }
-        }
-    }
-
-    /* Get ticket from the database */
-    static function loadTicket($id, $key)
-    {
-        $dbr = wfGetDB(DB_SLAVE);
-        $result = $dbr->select('et_ticket', '*', array(
-            'tk_id' => $id,
-            'tk_key' => $key,
-        ), __FUNCTION__);
-        $ticket = $dbr->fetchRow($result);
-        $dbr->freeResult($result);
-        return $ticket;
-    }
-
-    // Format some ticket properties for display
+    /** Format some ticket properties for display */
     static function formatTicket($t)
     {
         global $wgUser;
@@ -1204,130 +1154,24 @@ EOT;
         return $r;
     }
 
-    /* Draws a QR code with ticket check link */
-    function qrCode($args)
+    /**
+     * Get average correct count for the test
+     */
+    function getAverage($test)
     {
-        global $wgTitle, $IP, $wgOut;
-        $ticket = self::loadTicket($args['ticket_id'], $args['ticket_key']);
-        if (!$ticket) {
-            $wgOut->showErrorPage('easytests-check-no-ticket-title', 'easytests-check-no-ticket-text', array($name, $href));
-            return;
-        }
-        require_once(dirname(__FILE__) . '/includes/phpqrcode.php');
-        if (is_writable("$IP/images")) {
-            global $QR_CACHE_DIR, $QR_CACHEABLE;
-            $dir = "$IP/images/generated/qrcode/";
-            if (!file_exists($dir)) {
-                mkdir($dir, 0777, true);
-            }
-            $QR_CACHEABLE = true;
-            $QR_CACHE_DIR = $dir;
-        }
-        QRcode::png($wgTitle->getFullUrl(array(
-            'ticket_id' => $args['ticket_id'],
-            'ticket_key' => $args['ticket_key'],
-            'mode' => 'check',
-        )));
-        exit;
+        $dbr = wfGetDB(DB_SLAVE);
+        $res = $dbr->query('SELECT AVG(a) a FROM (' . $dbr->selectSQLtext(
+                array('et_ticket', 'et_choice_stats'),
+                'SUM(cs_correct)/COUNT(cs_correct)*100 a',
+                array('tk_id=cs_ticket', 'tk_test_id' => $test['test_id']),
+                __METHOD__,
+                array('GROUP BY' => 'cs_ticket')
+            ) . ') t', __METHOD__);
+        $row = $res->fetchObject();
+        return round($row->a);
     }
 
-    /* Check mode: check selected choices if not already checked,
-       display results and completion certificate */
-    function checkTest($args)
-    {
-        global $wgOut, $wgTitle, $wgUser;
-
-        $ticket = self::loadTicket($args['ticket_id'], $args['ticket_key']);
-        if (!$ticket) {
-            if ($args['id']) {
-                $test = self::loadTest(array('id' => $args['id']));
-                $name = $test['test_name'];
-                $href = $wgTitle->getFullUrl(array('id' => $test['test_id']));
-            }
-            $wgOut->showErrorPage('easytests-check-no-ticket-title', 'easytests-check-no-ticket-text', array($name, $href));
-            return;
-        }
-
-        $test = self::loadTest(array('id' => $ticket['tk_test_id']), $ticket['tk_variant']);
-        $testresult = self::checkOrLoadResult($ticket, $test, $args);
-        if (!$testresult) {
-            // checkOrLoadResult had shown the detail form - user must fill in additional fields
-            return;
-        }
-
-        $html = '';
-        if ($testresult['seen']) {
-            $html .= wfMsg('easytests-variant-already-seen') . ' ';
-        }
-        $href = $wgTitle->getFullUrl(array('id' => $test['test_id']));
-        if (self::isAdminForTest($test['test_id'])) {
-            $html .= wfMsg('easytests-try-another', $href);
-        }
-
-        if ($test['test_intro']) {
-            $html .= self::xelement('div', array('class' => 'easytests-intro easytests-intro-finish'), $test['test_intro']);
-        }
-
-        $f = self::formatTicket($ticket);
-        $html .= wfMsg('easytests-ticket-details',
-            $f['name'], $f['start'], $f['end'], $f['duration']
-        );
-
-        $is_adm = self::isAdminForTest($test['test_id']);
-        if ($is_adm) {
-            if ($ticket['tk_reviewed']) {
-                $html .= '<p>' . wfMsg('easytests-ticket-reviewed') . '</p>';
-            } else {
-                wfGetDB(DB_MASTER)->update(
-                    'et_ticket', array('tk_reviewed' => 1),
-                    array('tk_id' => $ticket['tk_id']), __METHOD__
-                );
-            }
-        }
-
-        $detail = $ticket['tk_details'] ? json_decode($ticket['tk_details'], true) : array();
-        if ($detail) {
-            $html .= '<ul>';
-            foreach ($detail as $k => $v) {
-                $html .= '<li>' . htmlspecialchars($k) . ': ' . htmlspecialchars($v) . '</li>';
-            }
-            $html .= '</ul>';
-        }
-
-        if ($is_adm) {
-            // Average result for admins
-            $html .= self::xelement('p', NULL, wfMsg('easytests-test-average', self::getAverage($test)));
-        }
-
-        // Variant number
-        $html .= wfMsg('easytests-variant-msg', $test['variant_hash_crc32']);
-
-        // Result
-        $html .= $this->getResultHtml($ticket, $test, $testresult);
-
-        if ($testresult['passed'] && ($ticket['tk_displayname'] || $ticket['tk_user_id'])) {
-            $html .= Xml::element('hr', array('style' => 'clear: both'));
-        }
-
-        /* Display answers also for links from result review table (showtut=1)
-           to users who are admins or have read access to quiz source */
-        if ($test['test_mode'] == 'TUTOR' || !empty($args['showtut']) && $is_adm) {
-            $html .= $this->getTutorHtml($ticket, $test, $testresult, $is_adm);
-        }
-
-        $wgOut->setPageTitle(wfMsg('easytests-check-pagetitle', $test['test_name']));
-        $wgOut->addHTML($html);
-    }
-
-    /* A cell with <span>$n</span> ≈ $p% */
-    static function wrapResult($n, $p, $e = 'td')
-    {
-        $cell = self::xelement('span', array('class' => 'easytests-count'), $n);
-        $cell .= ' ≈ ' . $p . '%';
-        return $e ? self::xelement($e, NULL, $cell) : $cell;
-    }
-
-    /* Get HTML code for result table (answers/score count/percent) */
+    /** Get HTML code for result table (answers/score count/percent) */
     function getResultHtml($ticket, $test, $testresult)
     {
         global $wgTitle;
@@ -1349,8 +1193,16 @@ EOT;
         return $html;
     }
 
-    /* TUTOR mode tests display all incorrect answered questions with
-       correct answers and explanations after testing. */
+    /** A cell with <span>$n</span> ≈ $p% */
+    static function wrapResult($n, $p, $e = 'td')
+    {
+        $cell = self::xelement('span', array('class' => 'easytests-count'), $n);
+        $cell .= ' ≈ ' . $p . '%';
+        return $e ? self::xelement($e, NULL, $cell) : $cell;
+    }
+
+    /** TUTOR mode tests display all incorrect answered questions with
+     * correct answers and explanations after testing. */
     function getTutorHtml($ticket, $test, $testresult, $is_adm = false)
     {
         $items = array();
@@ -1389,34 +1241,52 @@ EOT;
         return $html;
     }
 
-    /***************/
-    /* REVIEW MODE */
-    /***************/
-
-    /* Get HTML page list */
-    static function getPages($args, $npages, $curpage)
+    /** Draws a QR code with ticket check link */
+    function qrCode($args)
     {
-        global $wgTitle;
-        if ($npages <= 1)
-            return '';
-        $pages = array();
-        if ($curpage > 0)
-            $pages[] = self::xelement('a', array('href' => $wgTitle->getFullUrl(array('page' => $curpage - 1) + $args)), '‹');
-        for ($i = 0; $i < $npages; $i++) {
-            if ($i != $curpage)
-                $pages[] = self::xelement('a', array('href' => $wgTitle->getFullUrl(array('page' => $i) + $args)), $i + 1);
-            else
-                $pages[] = self::xelement('b', array('class' => 'easytests-curpage'), $i + 1);
+        global $wgTitle, $IP, $wgOut;
+        $ticket = self::loadTicket($args['ticket_id'], $args['ticket_key']);
+        if (!$ticket) {
+            $wgOut->showErrorPage('easytests-check-no-ticket-title', 'easytests-check-no-ticket-text', array($name, $href));
+            return;
         }
-        if ($curpage < $npages - 1)
-            $pages[] = self::xelement('a', array('href' => $wgTitle->getFullUrl(array('page' => $curpage + 1) + $args)), '›');
-        $html = wfMsg('easytests-pages');
-        $html .= implode(' ', $pages);
-        $html = self::xelement('p', array('class' => 'easytests-pages'), $html);
-        return $html;
+        require_once(dirname(__FILE__) . '/includes/phpqrcode.php');
+        if (is_writable("$IP/images")) {
+            global $QR_CACHE_DIR, $QR_CACHEABLE;
+            $dir = "$IP/images/generated/qrcode/";
+            if (!file_exists($dir)) {
+                mkdir($dir, 0777, true);
+            }
+            $QR_CACHEABLE = true;
+            $QR_CACHE_DIR = $dir;
+        }
+        QRcode::png($wgTitle->getFullUrl(array(
+            'ticket_id' => $args['ticket_id'],
+            'ticket_key' => $args['ticket_key'],
+            'mode' => 'check',
+        )));
+        exit;
     }
 
-    /* Select tickets from database */
+    /** Review closed tickets (completed attempts) */
+    function review($args)
+    {
+        global $wgOut;
+        $html = '';
+        $result = self::selectTickets($args);
+        $result['info']['show_details'] = !empty($args['show_details']);
+        $html .= self::selectTicketForm($result['info']);
+        if ($result['total'])
+            $html .= self::xelement('p', NULL, wfMsg('easytests-ticket-count', $result['total'], 1 + $result['page'] * $result['perpage'], count($result['tickets'])));
+        else
+            $html .= self::xelement('p', NULL, wfMsg('easytests-no-tickets'));
+        $html .= self::getTicketTable($result['tickets'], !empty($args['show_details']));
+        $html .= self::getPages($result['info'], ceil($result['total'] / $result['perpage']), $result['page']);
+        $wgOut->setPageTitle(wfMsg('easytests-review-pagetitle'));
+        $wgOut->addHTML($html);
+    }
+
+    /** Select tickets from database */
     static function selectTickets($args)
     {
         $dbr = wfGetDB(DB_SLAVE);
@@ -1485,7 +1355,8 @@ EOT;
             'OFFSET' => $perpage * $page,
             'SQL_CALC_FOUND_ROWS',
         ));
-        while ($row = $dbr->fetchRow($result)) {
+        while ($row = $dbr->fetchObject($result)) {
+            $row = (array) $row;
             /* Recalculate scores */
             if ($row['tk_end_time'] !== NULL && $row['tk_score'] === NULL)
                 self::recalcTicket($row);
@@ -1506,7 +1377,48 @@ EOT;
         );
     }
 
-    /* Get HTML table with tickets */
+    /** Recalculate scores for a completed ticket */
+    static function recalcTicket(&$ticket)
+    {
+        if ($ticket['tk_end_time'] === NULL)
+            return;
+        $test = self::loadTest(array('id' => $ticket['tk_test_id']), $ticket['tk_variant']);
+        $testresult = self::checkOrLoadResult($ticket, $test, array());
+        $update = array(
+            /* Testing result to be shown in the table.
+               Nothing relies on these values. */
+            'tk_score' => $testresult['score'],
+            'tk_score_percent' => $testresult['score_percent'],
+            'tk_correct' => $testresult['correct_count'],
+            'tk_correct_percent' => $testresult['correct_percent'],
+            'tk_pass' => $testresult['passed'] ? 1 : 0,
+        );
+        $ticket = array_merge($ticket, $update);
+        $dbw = wfGetDB(DB_MASTER);
+        $dbw->update('et_ticket', $update, array('tk_id' => $ticket['tk_id']), __METHOD__);
+    }
+
+    /** Get HTML form for selecting tickets */
+    static function selectTicketForm($info)
+    {
+        global $wgTitle;
+        $html = '';
+        $html .= Html::hidden('mode', 'review');
+        $html .= Xml::inputLabel(wfMsg('easytests-quiz') . ': ', 'quiz_name', 'quiz_name', 30, $info['quiz_name']) . '<br />';
+        $html .= Xml::inputLabel(wfMsg('easytests-variant') . ': ', 'variant_hash_crc32', 'variant_hash_crc32', 10, $info['variant_hash_crc32']) . '<br />';
+        $html .= Xml::inputLabel(wfMsg('easytests-user') . ': ', 'user_text', 'user_text', 30, $info['user_text']) . '<br />';
+        $html .= Xml::inputLabel(wfMsg('easytests-start') . ': ', 'start_time_min', 'start_time_min', 19, $info['start_time_min']);
+        $html .= Xml::inputLabel(wfMsg('easytests-to'), 'start_time_max', 'start_time_max', 19, $info['start_time_max']) . '<br />';
+        $html .= Xml::inputLabel(wfMsg('easytests-end') . ': ', 'end_time_min', 'end_time_min', 19, $info['end_time_min']);
+        $html .= Xml::inputLabel(wfMsg('easytests-to'), 'end_time_max', 'end_time_max', 19, $info['end_time_max']) . '<br />';
+        $html .= Xml::inputLabel(wfMsg('easytests-perpage') . ': ', 'perpage', 'perpage', 5, $info['perpage']) . ' &nbsp; ';
+        $html .= Xml::checkLabel(wfMsg('easytests-show-details'), 'show_details', 'show_details', $info['show_details']) . '<br />';
+        $html .= Xml::submitButton(wfMsg('easytests-select-tickets'));
+        $html = self::xelement('form', array('method' => 'GET', 'action' => $wgTitle->getFullUrl(), 'class' => 'easytests-select-tickets'), $html);
+        return $html;
+    }
+
+    /** Get HTML table with tickets */
     static function getTicketTable($tickets, $showDetails = false)
     {
         global $wgTitle, $wgUser;
@@ -1607,41 +1519,159 @@ EOT;
         return $html;
     }
 
-    /* Get HTML form for selecting tickets */
-    static function selectTicketForm($info)
+    /**
+     * ***********
+     * REVIEW MODE
+     * ***********
+     *
+     * Get HTML page list
+     */
+    static function getPages($args, $npages, $curpage)
     {
         global $wgTitle;
-        $html = '';
-        $html .= Html::hidden('mode', 'review');
-        $html .= Xml::inputLabel(wfMsg('easytests-quiz') . ': ', 'quiz_name', 'quiz_name', 30, $info['quiz_name']) . '<br />';
-        $html .= Xml::inputLabel(wfMsg('easytests-variant') . ': ', 'variant_hash_crc32', 'variant_hash_crc32', 10, $info['variant_hash_crc32']) . '<br />';
-        $html .= Xml::inputLabel(wfMsg('easytests-user') . ': ', 'user_text', 'user_text', 30, $info['user_text']) . '<br />';
-        $html .= Xml::inputLabel(wfMsg('easytests-start') . ': ', 'start_time_min', 'start_time_min', 19, $info['start_time_min']);
-        $html .= Xml::inputLabel(wfMsg('easytests-to'), 'start_time_max', 'start_time_max', 19, $info['start_time_max']) . '<br />';
-        $html .= Xml::inputLabel(wfMsg('easytests-end') . ': ', 'end_time_min', 'end_time_min', 19, $info['end_time_min']);
-        $html .= Xml::inputLabel(wfMsg('easytests-to'), 'end_time_max', 'end_time_max', 19, $info['end_time_max']) . '<br />';
-        $html .= Xml::inputLabel(wfMsg('easytests-perpage') . ': ', 'perpage', 'perpage', 5, $info['perpage']) . ' &nbsp; ';
-        $html .= Xml::checkLabel(wfMsg('easytests-show-details'), 'show_details', 'show_details', $info['show_details']) . '<br />';
-        $html .= Xml::submitButton(wfMsg('easytests-select-tickets'));
-        $html = self::xelement('form', array('method' => 'GET', 'action' => $wgTitle->getFullUrl(), 'class' => 'easytests-select-tickets'), $html);
+        if ($npages <= 1)
+            return '';
+        $pages = array();
+        if ($curpage > 0)
+            $pages[] = self::xelement('a', array('href' => $wgTitle->getFullUrl(array('page' => $curpage - 1) + $args)), '‹');
+        for ($i = 0; $i < $npages; $i++) {
+            if ($i != $curpage)
+                $pages[] = self::xelement('a', array('href' => $wgTitle->getFullUrl(array('page' => $i) + $args)), $i + 1);
+            else
+                $pages[] = self::xelement('b', array('class' => 'easytests-curpage'), $i + 1);
+        }
+        if ($curpage < $npages - 1)
+            $pages[] = self::xelement('a', array('href' => $wgTitle->getFullUrl(array('page' => $curpage + 1) + $args)), '›');
+        $html = wfMsg('easytests-pages');
+        $html .= implode(' ', $pages);
+        $html = self::xelement('p', array('class' => 'easytests-pages'), $html);
         return $html;
     }
 
-    /* Review closed tickets (completed attempts) */
-    function review($args)
+    /** Return HTML content for "Please select test to review results" form */
+    static function getSelectTestForReviewForm($args)
+    {
+        global $wgTitle;
+        $form = '';
+        $form .= wfMsg('easytests-quiz') . ': ';
+        $name = isset($args['quiz_name']) ? $args['quiz_name'] : '';
+        $form .= self::xelement('input', array('type' => 'text', 'name' => 'quiz_name', 'value' => $name)) . ' ';
+        $form .= Xml::submitButton(wfMsg('easytests-select-tickets'));
+        $form = self::xelement('form', array('action' => $wgTitle->getLocalUrl(array('mode' => 'review')), 'method' => 'POST'), $form);
+        return $form;
+    }
+
+    /**
+     * ************
+     * PRINT MODE
+     * ************
+     *
+     * Display a "dump" for the test:
+     * - all questions without information about correct answers
+     * - a printable empty table for filling it with answer numbers
+     * - a table similar to the previous, but filled with correct answer numbers and question labels ("check-list")
+     *   (question label is intended to briefly describe question subject)
+     * Check list is shown only to test administrators and users who can read the quiz source article.
+     * Note that read access to articles included into the quiz are not checked.
+     * CSS page-break styles are specified so you can print this page.
+     */
+    static function printTest($test, $args, $answers = NULL)
     {
         global $wgOut;
         $html = '';
-        $result = self::selectTickets($args);
-        $result['info']['show_details'] = !empty($args['show_details']);
-        $html .= self::selectTicketForm($result['info']);
-        if ($result['total'])
-            $html .= self::xelement('p', NULL, wfMsg('easytests-ticket-count', $result['total'], 1 + $result['page'] * $result['perpage'], count($result['tickets'])));
-        else
-            $html .= self::xelement('p', NULL, wfMsg('easytests-no-tickets'));
-        $html .= self::getTicketTable($result['tickets'], !empty($args['show_details']));
-        $html .= self::getPages($result['info'], ceil($result['total'] / $result['perpage']), $result['page']);
-        $wgOut->setPageTitle(wfMsg('easytests-review-pagetitle'));
+
+        $is_adm = self::isAdminForTest($test['test_id']);
+
+        /* TestInfo */
+        $ti = wfMsg('easytests-variant-msg', $test['variant_hash_crc32']);
+        if ($test['test_intro']) {
+            $ti = self::xelement('div', array('class' => 'easytests-intro'), $test['test_intro']) . $ti;
+        }
+
+        /* Display question list (with editsection links for admins) */
+        $html .= self::xelement('h2', NULL, wfMsg('easytests-question-sheet'));
+        $html .= $ti;
+        $html .= self::getQuestionList($test['questions'], false, !empty($args['edit']) && $is_adm);
+
+        /* Display questionnaire */
+        $html .= Xml::element('hr', array('style' => 'page-break-after: always'), '');
+        $html .= self::xelement('h2', NULL, wfMsg('easytests-test-sheet'));
+        $html .= $ti;
+        $html .= self::getCheckList($test, $args, false);
+
+        /* Display questionnaire filled with user's answers */
+        if ($answers !== NULL) {
+            $html .= Xml::element('hr', array('style' => 'page-break-after: always'), '');
+            $html .= self::xelement('h2', NULL, wfMsg('easytests-user-answers'));
+            $html .= wfMsg('easytests-variant-msg', $test['variant_hash_crc32']);
+            $html .= self::getCheckList($test, $args, false, $answers);
+        }
+
+        if ($is_adm) {
+            /* Display check-list to users who can read source article */
+            $html .= self::xelement('h2', array('style' => 'page-break-before: always'), wfMsg('easytests-answer-sheet'));
+            $html .= $ti;
+            $html .= self::getCheckList($test, $args, true);
+        }
+
+        $wgOut->setPageTitle(wfMsg('easytests-print-pagetitle', $test['test_name']));
         $wgOut->addHTML($html);
+    }
+
+    /**
+     * Display a table with question numbers, correct answers, statistics and labels when $checklist is TRUE
+     * Display a table with question numbers and two blank columns - "answer" and "remark" when $checklist is FALSE
+     * Display a table with question numbers and user answers when $answers is specified */
+    static function getCheckList($test, $args, $checklist = false, $answers = NULL)
+    {
+        $table = '';
+        $table .= self::xelement('th', array('class' => 'easytests-tn'), wfMsg('easytests-table-number'));
+        $table .= self::xelement('th', NULL, wfMsg('easytests-table-answer'));
+        if ($checklist) {
+            $table .= self::xelement('th', NULL, wfMsg('easytests-table-stats'));
+            $table .= self::xelement('th', NULL, wfMsg('easytests-table-label'));
+        } else
+            $table .= self::xelement('th', NULL, wfMsg('easytests-table-remark'));
+        foreach ($test['questions'] as $k => $q) {
+            $row = '<td>' . ($k + 1) . '</td>';
+            if ($checklist) {
+                /* build a list of correct choice indexes in the shuffled array (or texts for free-text questions) */
+                $correct_indexes = array();
+                foreach ($q['correct_choices'] as $c) {
+                    $correct_indexes[] = $q['correct_count'] < count($q['choices']) ? $c['index'] : $c['ch_text'];
+                }
+                $row .= '<td>' . htmlspecialchars(implode(', ', $correct_indexes)) . '</td>';
+                if ($q['tries']) {
+                    $row .= '<td>' . $q['correct_tries'] . '/' . $q['tries'] .
+                        ' ≈ ' . round($q['correct_tries'] * 100.0 / $q['tries']) . '%</td>';
+                } else
+                    $row .= '<td></td>';
+                $row .= '<td>' . $q['qn_label'] . '</td>';
+            } elseif ($answers && !empty($answers[$q['qn_hash']])) {
+                $ans = $answers[$q['qn_hash']];
+                $ch = !empty($ans['cs_choice_num']) ? $q['choiceByNum'][$ans['cs_choice_num']] : NULL;
+                $row .= '<td>' . ($ch ? $ch['index'] : $ans['cs_text']) . '</td><td' . ($ans['cs_correct'] ? '' : ' class="easytests-fail-bd"') . '>' .
+                    wfMsg('easytests-is-' . ($ans['cs_correct'] ? 'correct' : 'incorrect')) . '</td>';
+            } else
+                $row .= '<td></td><td></td>';
+            $table .= '<tr>' . $row . '</tr>';
+        }
+        $table = self::xelement('table', array('class' => $checklist ? 'easytests-checklist' : 'easytests-questionnaire'), $table);
+        return $table;
+    }
+
+    static function showTicket($test)
+    {
+        global $wgOut, $wgTitle;
+        $ticket = self::createTicket($test, NULL);
+        $link = $wgTitle->getFullUrl(array(
+            'id' => $test['test_id'],
+            'ticket_id' => $ticket['tk_id'],
+            'ticket_key' => $ticket['tk_key'],
+        ));
+        $wgOut->setPageTitle(wfMsg('easytests-pagetitle', $test['test_name']));
+        $wgOut->addHTML(
+            wfMsg('easytests-ticket-link') . ': <a href="' . $link . '">' . htmlspecialchars($link) . '</a>'
+        );
     }
 }
