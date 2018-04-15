@@ -261,6 +261,7 @@ $messages['uk'] = array(
     'easytests-parse-choice' => 'Відповідь|(?:Choice|Answer)(?!s)',
     'easytests-parse-choices' => 'Відповіді|Варіанти\s*відповідей|Choices|Answers',
     'easytests-parse-correct-matches' => '(?:Правильний\s*порядок)[:\s]*',
+    'easytests-parse-correct-parallels' => '(?:Правильні\s*відповідності)[:\s]*',
     'easytests-parse-correct' => '(?:Правильна\s*відповідь|(?:Correct|Right)\s*(?:Choice|Answer)(?!s))[:\s]*',
     'easytests-parse-corrects' => '(?:(?:Правильні\s*відповіді|Правильні\s*варіанти\s*відповідей)|(?:Correct|Right)\s*(?:Choices|Answers))[:\s]*',
     'easytests-parse-label' => 'Мітка|Label',

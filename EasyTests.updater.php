@@ -38,7 +38,7 @@ class EasyTestsUpdater
     );
     static $test_keys;
     static $regexp_test, $regexp_test_nq, $regexp_question, $regexp_true, $regexp_correct, $regexp_form;
-    static $qn_keys = array('choice', 'choices', 'correct', 'corrects', 'label', 'explanation', 'comments', 'correct-matches', 'choices-matches');
+    static $qn_keys = array('choice', 'choices', 'correct', 'corrects', 'label', 'explanation', 'comments', 'correct-matches', 'correct-parallels');
 
     /* Parse wiki-text $text without TOC, heading numbers and EditSection links turned on */
     static $parser = NULL, $parserOptions;
@@ -83,13 +83,16 @@ class EasyTestsUpdater
         $test_regexp_nq = $test_regexp;
         array_unshift($test_regexp, '(' . wfMsgReal('easytests-parse-question', NULL, true, $lang, false) . ')');
         array_unshift($test_regexp, '(' . wfMsgReal('easytests-parse-question-match', NULL, true, $lang, false) . ')');
-        array_unshift($test_regexp, '(' . wfMsgReal('easytests-parse-form', NULL, true, $lang, false) . ')');
+        array_unshift($test_regexp, '(' . wfMsgReal('easytests-parse-question-parallel', NULL, true, $lang, false) . ')');
+//        array_unshift($test_regexp, '(' . wfMsgReal('easytests-fake-key', NULL, true, $lang, false) . ')');
+
         self::$regexp_test = str_replace('/', '\\/', implode('|', $test_regexp));
         self::$regexp_test_nq = '()()' . str_replace('/', '\\/', implode('|', $test_regexp_nq));
         self::$regexp_question = str_replace('/', '\\/', implode('|', $qn_regexp));
         self::$regexp_true = wfMsgReal('easytests-parse-true', NULL, true, $lang, false);
         self::$regexp_correct = wfMsgReal('easytests-parse-correct', NULL, true, $lang, false);
         self::$regexp_correct = wfMsgReal('easytests-parse-correct-matches', NULL, true, $lang, false);
+        self::$regexp_correct = wfMsgReal('easytests-parse-correct-parallels', NULL, true, $lang, false);
     }
 
     /* Transform quiz field value according to its type */
@@ -140,8 +143,8 @@ class EasyTestsUpdater
             $ok = true;
             if ($incorrect >= count($last_question['choices'])) {
                 if ($last_question['qn_type'] != 'simple' and $last_question['qn_type'] != 'free-text') {
-                    $log .= "[INFO] Defined \"".$last_question['qn_type']."\" question: ".self::textlog($last_question['qn_text']).": \n";
-                    $last_question['choices'] = self::markChoicesOrder($last_question['choices'], $last_question['qn_type']);
+                    $log .= "[INFO] Defined \"".$last_question['qn_type']."\" question: ".self::textlog($last_question['qn_text'])."\n";
+                    $last_question['choices'] = self::transformChoices($last_question['choices'], $last_question['qn_type']);
                     $questions[count($questions) - 1] = $last_question;
                 }else {
                     $log .= "[INFO] All choices are marked correct, question will be free-text: " . self::textlog($last_question['qn_text']) . "\n";
@@ -296,7 +299,7 @@ class EasyTestsUpdater
                                     $append = array(&$q[count($q) - 1]["qn_$sid"]);
                                 } else {
                                     /* Some kind of choice(s) section */
-                                    $correct = ($sid == 'correct' || $sid == 'corrects' || $sid == 'correct-matches') ? 1 : 0;
+                                    $correct = ($sid == 'correct' || $sid == 'corrects' || $sid == 'correct-matches' || $sid == 'correct-parallels') ? 1 : 0;
                                     $lc = $correct ? 'correct choice' : 'choice';
                                     if ($sid == 'correct' || $sid == 'choice') {
                                         $log .= "[INFO] Begin single $lc section: $log_el\n";
@@ -564,11 +567,12 @@ class EasyTestsUpdater
      * @param string $question_type
      * @return array
      */
-    private static function markChoicesOrder($choices = [], $question_type = '')
+    private static function transformChoices($choices = [], $question_type = '')
     {
         if(!empty($choices)) {
             switch ($question_type) {
                 case 'parallel':
+                    $choices = self::parseParallelChoices($choices);
                     break;
                 case 'order':
                     for($i = 0; $i < count($choices); $i++) {
@@ -578,5 +582,19 @@ class EasyTestsUpdater
             }
         }
         return $choices;
+    }
+
+    private static function parseParallelChoices($choices = array()) {
+        $new_choices = array();
+        foreach ($choices as $key => $choice) {
+            $ch = $choice;
+            $exploded_str = explode(':=', $choice['ch_text']);
+
+            $ch['ch_text'] = $exploded_str[0];
+            $ch['ch_parallel'] = $exploded_str[1];
+
+            array_push($new_choices, $ch);
+        }
+        return $new_choices;
     }
 }

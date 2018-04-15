@@ -29,6 +29,11 @@ class DOMParseUtils
             // set question type for hard questions
             if(count($m) > 0 and self::findQuestionType($m, $wgLanguageCode)){
                 $m[count($m) - 1]['type'] = self::findQuestionType($m, $wgLanguageCode);
+                // we need array with 2 items, so insert fake element
+                // * magic *
+                if(count($m) == 1) {
+                    array_unshift($m, array('', -1));
+                }
             }
 
         } elseif (preg_match("/$re((?:\s*<[^<>]*>)*)\s*$/uis", $html, $m, PREG_OFFSET_CAPTURE)) {
