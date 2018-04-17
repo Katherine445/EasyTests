@@ -529,8 +529,9 @@ class EasyTestsUpdater
     static function insertOrUpdate($dbw, $table, $rows, $fname)
     {
         global $wgDBtype;
-        if ($wgDBtype != 'mysql')
+        if ($wgDBtype != 'mysql') {
             die('EasyTests uses MySQL-specific INSERT INTO ... ON DUPLICATE KEY UPDATE by now. Fix it if you want.');
+        }
         $keys = array_keys($rows[0]);
         $sql = 'INSERT INTO ' . $dbw->tableName($table) . ' (' . implode(',', $keys) . ') VALUES ';
         foreach ($rows as &$row) {
@@ -549,6 +550,12 @@ class EasyTestsUpdater
         return $dbw->query($sql, $fname);
     }
 
+    /**
+     * Remove empty elements from array
+     *
+     * @param $arr
+     * @return array
+     */
     static function trimEmptyElements($arr) {
         $new_arr = array();
         foreach ($arr as $key=>$val) {
@@ -584,6 +591,10 @@ class EasyTestsUpdater
         return $choices;
     }
 
+    /**
+     * @param array $choices
+     * @return array
+     */
     private static function parseParallelChoices($choices = array()) {
         $new_choices = array();
         foreach ($choices as $key => $choice) {
