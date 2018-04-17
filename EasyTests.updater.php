@@ -84,7 +84,6 @@ class EasyTestsUpdater
         array_unshift($test_regexp, '(' . wfMsgReal('easytests-parse-question', NULL, true, $lang, false) . ')');
         array_unshift($test_regexp, '(' . wfMsgReal('easytests-parse-question-match', NULL, true, $lang, false) . ')');
         array_unshift($test_regexp, '(' . wfMsgReal('easytests-parse-question-parallel', NULL, true, $lang, false) . ')');
-//        array_unshift($test_regexp, '(' . wfMsgReal('easytests-fake-key', NULL, true, $lang, false) . ')');
 
         self::$regexp_test = str_replace('/', '\\/', implode('|', $test_regexp));
         self::$regexp_test_nq = '()()' . str_replace('/', '\\/', implode('|', $test_regexp_nq));
@@ -137,16 +136,16 @@ class EasyTestsUpdater
         }
         if (empty($last_question['choices'])) {
             $log .= "[ERROR] No choices defined for question: " . self::textlog($last_question['qn_text']) . "\n";
-        }elseif (!$incorrect) {
+        } elseif (!$incorrect) {
             $log .= "[ERROR] No correct choices for question: " . self::textlog($last_question['qn_text']) . "\n";
-        }else {
+        } else {
             $ok = true;
             if ($incorrect >= count($last_question['choices'])) {
                 if ($last_question['qn_type'] != 'simple' and $last_question['qn_type'] != 'free-text') {
-                    $log .= "[INFO] Defined \"".$last_question['qn_type']."\" question: ".self::textlog($last_question['qn_text'])."\n";
+                    $log .= "[INFO] Defined \"" . $last_question['qn_type'] . "\" question: " . self::textlog($last_question['qn_text']) . "\n";
                     $last_question['choices'] = self::transformChoices($last_question['choices'], $last_question['qn_type']);
                     $questions[count($questions) - 1] = $last_question;
-                }else {
+                } else {
                     $log .= "[INFO] All choices are marked correct, question will be free-text: " . self::textlog($last_question['qn_text']) . "\n";
                     $questions[count($questions) - 1]['qn_type'] = 'free-text';
                 }
@@ -164,8 +163,9 @@ class EasyTestsUpdater
     const ST_CHOICE = 3;    /* Inside single choice section */
     const ST_CHOICES = 4;   /* Inside multiple choices section */
 
-    /* parseQuiz() using a state machine :-) */
     /**
+     * parse quiz using a state machine
+     *
      * @param $html
      * @return array
      */
@@ -212,7 +212,7 @@ class EasyTestsUpdater
 
             if ($element->nodeType == XML_ELEMENT_NODE) {
                 // we don't need to parse <body> element
-                if($element->nodeName !== 'body') {
+                if ($element->nodeName !== 'body') {
                     $end = false;
 
                     // find section definition
@@ -240,9 +240,9 @@ class EasyTestsUpdater
                                 if ($q) {
                                     self::checkLastQuestion($q, $log);
                                 }
-                                if(isset($chk[1][1]['type'])) {
+                                if (isset($chk[1][1]['type'])) {
                                     $question_type = $chk[1][1]['type'];
-                                }else{
+                                } else {
                                     $question_type = '';
                                 }
                                 /* Question section - found */
@@ -271,8 +271,7 @@ class EasyTestsUpdater
                                 /* INFO: Parameter section inside question section / choice section */
                                 $log .= "[WARN] Field section must come before questions: $log_el\n";
                             }
-                        }
-                        elseif ($st == self::ST_QUESTION || $st == self::ST_CHOICE || $st == self::ST_CHOICES) {
+                        } elseif ($st == self::ST_QUESTION || $st == self::ST_CHOICE || $st == self::ST_CHOICES) {
                             $chk = DOMParseUtils::checkNode($element, self::$regexp_question, true);
                             if ($chk) {
                                 /* Question sub-section */
@@ -322,8 +321,7 @@ class EasyTestsUpdater
                             $log .= "[WARN] Unparsed heading outside question: $log_el\n";
                             $end = true;
                         }
-                    }
-                    /* <dt> for a parameter */
+                    } /* <dt> for a parameter */
                     elseif (($st == self::ST_OUTER || $st == self::ST_PARAM_DD) && $element->nodeName == 'dt') {
                         $chk = DOMParseUtils::checkNode($element, self::$regexp_test_nq, true);
                         $log_el = '; ' . trim(strip_tags(DOMParseUtils::saveChildren($element))) . ':';
@@ -349,8 +347,7 @@ class EasyTestsUpdater
                             $log .= "[WARN] Unparsed definition list item: $log_el\n";
                             $end = true;
                         }
-                    }
-                    /* Value for quiz parameter $field */
+                    } /* Value for quiz parameter $field */
                     elseif ($st == self::ST_PARAM_DD && $element->nodeName == 'dd') {
                         $value = self::transformFieldValue($field, DOMParseUtils::saveChildren($element));
                         $log .= "[INFO] Quiz $field = " . self::textlog($value) . "\n";
@@ -375,8 +372,7 @@ class EasyTestsUpdater
                         if ($append[0])
                             $append[0] .= '<br />';
                         $append[0] .= trim(DOMParseUtils::saveChildren($element));
-                    }
-                    elseif ($st == self::ST_CHOICES && $element->nodeName == 'li') {
+                    } elseif ($st == self::ST_CHOICES && $element->nodeName == 'li') {
                         $chk = DOMParseUtils::checkNode($element, wfMsgNoTrans('easytests-parse-correct'), true);
                         $c = $correct;
                         if ($chk) {
@@ -402,7 +398,7 @@ class EasyTestsUpdater
             } elseif ($append && $element->nodeType == XML_TEXT_NODE && trim($element->nodeValue)) {
                 $append[0] .= $element->nodeValue;
             }
-        // end while
+            // end while
         }
         if ($q) {
             self::checkLastQuestion($q, $log);
@@ -556,9 +552,10 @@ class EasyTestsUpdater
      * @param $arr
      * @return array
      */
-    static function trimEmptyElements($arr) {
+    static function trimEmptyElements($arr)
+    {
         $new_arr = array();
-        foreach ($arr as $key=>$val) {
+        foreach ($arr as $key => $val) {
             if ($val[0] !== '') {
                 $val['current_index'] = $key;
                 array_push($new_arr, $val);
@@ -576,13 +573,13 @@ class EasyTestsUpdater
      */
     private static function transformChoices($choices = [], $question_type = '')
     {
-        if(!empty($choices)) {
+        if (!empty($choices)) {
             switch ($question_type) {
                 case 'parallel':
                     $choices = self::parseParallelChoices($choices);
                     break;
                 case 'order':
-                    for($i = 0; $i < count($choices); $i++) {
+                    for ($i = 0; $i < count($choices); $i++) {
                         $choices[$i]['ch_order_index'] = $i;
                     }
                     break;
@@ -595,7 +592,8 @@ class EasyTestsUpdater
      * @param array $choices
      * @return array
      */
-    private static function parseParallelChoices($choices = array()) {
+    private static function parseParallelChoices($choices = array())
+    {
         $new_choices = array();
         foreach ($choices as $key => $choice) {
             $ch = $choice;

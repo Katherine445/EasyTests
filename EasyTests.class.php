@@ -256,7 +256,8 @@ class EasyTestsPage extends SpecialPage
         return $test;
     }
 
-    /** Question must have at least 1 correct and 1 incorrect choice
+    /**
+     * Question must have at least 1 correct choice
      * @param $question
      * @param $var
      * @param int $shuffle
@@ -265,7 +266,7 @@ class EasyTestsPage extends SpecialPage
     static function finalizeQuestionRow(&$question, $var, $shuffle = 0)
     {
         $hash = $question['qn_hash'];
-        $hard_question = $question['qn_type'] == 'order' ? true : false;
+        $hard_question = ($question['qn_type'] == 'order' or $question['qn_type'] == 'parallel') ? true : false;
 
         if (!$var && !count($question['choices'])) {
             /* No choices defined for this question, skip it */
@@ -866,7 +867,7 @@ class EasyTestsPage extends SpecialPage
                 }
                 break;
             case 'order':
-                $options = self::buildOptionsArray($question['choices']);
+                $options = self::buildOptionsArray($question['choices'], $question['qn_type']);
                 foreach ($question['choices'] as $i => $choice) {
                     $h = $choice['ch_text'] . '&nbsp;' . self::xelement('select', array(
                             'name' => "a[$qn_key]",
@@ -877,7 +878,15 @@ class EasyTestsPage extends SpecialPage
                 $html .= self::xelement('ol', array('class' => 'easytests-choices'), $choices);
                 break;
             case 'parallel':
-                // TODO: build selectboxes
+                $options = self::buildOptionsArray($question['choices'], $question['qn_type']);
+                foreach ($question['choices'] as $i => $choice) {
+                    $h = $choice['ch_text'] . '&nbsp;' . self::xelement('select', array(
+                            'name' => "a[$qn_key]",
+                        ), $options);
+
+                    $choices .= self::xelement('li', array('class' => 'easytests-choice'), $h);
+                }
+                $html .= self::xelement('ol', array('class' => 'easytests-choices'), $choices);
                 break;
             default:
                 foreach ($question['choices'] as $i => $choice) {
@@ -917,16 +926,38 @@ class EasyTestsPage extends SpecialPage
      * buildOptionsArray
      *
      * @param $choices
+     * @param $question_type
      * @return string
      */
-    private static function buildOptionsArray($choices)
+    private static function buildOptionsArray($choices, $question_type)
     {
         $options_arr = '';
-        foreach ($choices as $key => $value) {
-            $options_arr .= Xml::element('option', array(
-                'value' => $key,
-            ), $key + 1);
+        switch($question_type) {
+            case 'order' :
+                foreach ($choices as $key => $value) {
+                    $options_arr .= Xml::element('option', array(
+                        'value' => $key,
+                    ), $key + 1);
+                }
+                break;
+            case 'parallel' :
+                usort($choices, function ($a, $b) {
+                    if(intval($a['ch_num']) > intval($b['ch_num'])) {
+                        return 1;
+                    }elseif (intval($a['ch_num']) < intval($b['ch_num'])) {
+                        return -1;
+                    }else {
+                        return 0;
+                    }
+                });
+                foreach ($choices as $key => $value) {
+                    $options_arr .= Xml::element('option', array(
+                        'value' => $value['ch_parallel'],
+                    ), $value['ch_parallel']);
+                }
+                break;
         }
+
         return $options_arr;
     }
 
