@@ -4,52 +4,11 @@ class DOMParseUtils
 {
     const VERSION = '2018-03-24';
 
-    /* Check if $mark is present inside $element. Return false when not.
-       Return copy of $element with $mark removed from it when yes. */
-    static function checkNode($element, $mark, $is_regexp = false)
-    {
-        $document = $element->ownerDocument;
-        $html = $document->saveXML($element);
-        global $wgLanguageCode;
-        $re = str_replace('/', '\\/', $is_regexp ? "(?:$mark)" : preg_quote($mark));
-        if (preg_match("/^\s*((?:<[^<>]*>\s*)*)$re/uis", $html, $m, PREG_OFFSET_CAPTURE)) {
-            $new = $m[1][0] . substr($html, strlen($m[0][0]));
-            /*
-             * We should slice array on 2 or 3 length
-             * according to empty items
-             */
-            $simple_question = wfMsgReal('easytests-parse-question', NULL, true, $wgLanguageCode, false);
-            if (preg_match("/^\s*((?:<[^<>]*>\s*)*)$simple_question/uis", $m[count($m) - 1][0]) and count($m) > 4) {
-                // Remove founding html and spaces
-                array_splice($m, 0, 3);
-            } else {
-                // Remove founding html
-                array_splice($m, 0, 2);
-            }
-            // set question type for hard questions
-            if(count($m) > 0 and self::findQuestionType($m, $wgLanguageCode)){
-                $m[count($m) - 1]['type'] = self::findQuestionType($m, $wgLanguageCode);
-                // we need array with 2 items, so insert fake element
-                // * magic *
-                if(count($m) == 1) {
-                    array_unshift($m, array('', -1));
-                }
-            }
-
-        } elseif (preg_match("/$re((?:\s*<[^<>]*>)*)\s*$/uis", $html, $m, PREG_OFFSET_CAPTURE)) {
-            $new = substr($html, 0, $m[0][1]) . $m[count($m) - 1][0];
-            array_shift($m);
-            array_pop($m);
-        } else {
-            return false;
-        }
-        $new_document = self::loadDOM($new);
-        $new_element = $new_document->documentElement->childNodes->item(0)->childNodes->item(0);
-        $new_element = $document->importNode($new_element, true);
-        return array($new_element, $m);
-    }
-
-    /* Export children of $element to an XML string */
+    /** Export children of $element to an XML string
+     * @param $element
+     * @param bool $trim
+     * @return null|string|string[]
+     */
     static function saveChildren($element, $trim = false)
     {
         if ($trim)
@@ -60,7 +19,10 @@ class DOMParseUtils
         return $xml;
     }
 
-    /* "Trim" tags */
+    /** "Trim" tags
+     * @param $element
+     * @return
+     */
     static function trimDOM($element)
     {
         if (!$element->childNodes->length)
@@ -78,7 +40,12 @@ class DOMParseUtils
         return $element;
     }
 
-    /* Split DOM element by text node containing $mark inside nodeValue */
+    /** Split DOM element by text node containing $mark inside nodeValue
+     * @param $element
+     * @param $document
+     * @param $mark
+     * @return array
+     */
     static function splitDOM($element, $document, $mark)
     {
         $frags = array($element->cloneNode(false));
@@ -105,23 +72,29 @@ class DOMParseUtils
         return $frags;
     }
 
-    /* Extract entitled sections from $element using DOM
-       $element     => DOMElement to scan
-       $headingmark => include only headings matching string or regexp at the beginning or at the end
-       $is_regexp   => if true, headingmark is treated as regexp (PCRE)
-       $nodenames   => include only nodes with names matching one of keys of this array, and assume their
-                       heading level (an integer number) equal to values of this array. example:
-                       array('h1' => 1, 'h2' => 2, <node_name> => <heading_level>, ...)
-       $section0    => if true, also extract the part of scanned element going before any matching heading
-                       and return it as the first item of output array
-       Returns NULL when $element has no children.
-       Else returns array(array(
-           'level'   => <heading_level>,
-           'title'   => DOMElement <heading_content>,
-           'match'   => array() <regexp_match_array>,
-           'content' => DOMElement <section_content>,
-       ), ...)
-    */
+    /** Extract entitled sections from $element using DOM
+     * $element     => DOMElement to scan
+     * $headingmark => include only headings matching string or regexp at the beginning or at the end
+     * $is_regexp   => if true, headingmark is treated as regexp (PCRE)
+     * $nodenames   => include only nodes with names matching one of keys of this array, and assume their
+     * heading level (an integer number) equal to values of this array. example:
+     * array('h1' => 1, 'h2' => 2, <node_name> => <heading_level>, ...)
+     * $section0    => if true, also extract the part of scanned element going before any matching heading
+     * and return it as the first item of output array
+     * Returns NULL when $element has no children.
+     * Else returns array(array(
+     * 'level'   => <heading_level>,
+     * 'title'   => DOMElement <heading_content>,
+     * 'match'   => array() <regexp_match_array>,
+     * 'content' => DOMElement <section_content>,
+     * ), ...)
+     * @param $element
+     * @param bool $headingmark
+     * @param bool $is_regexp
+     * @param null $nodenames
+     * @param bool $include_section0
+     * @return array|null
+     */
     static function getSections($element, $headingmark = false, $is_regexp = false,
                                 $nodenames = NULL, $include_section0 = false)
     {
@@ -202,7 +175,86 @@ class DOMParseUtils
         return $sections;
     }
 
-    /* Get list items of outer-level lists */
+    /** Check if $mark is present inside $element. Return false when not.
+     * Return copy of $element with $mark removed from it when yes.
+     * @param $element
+     * @param $mark
+     * @param bool $is_regexp
+     * @return array|bool
+     */
+    static function checkNode($element, $mark, $is_regexp = false)
+    {
+        $document = $element->ownerDocument;
+        $html = $document->saveXML($element);
+        global $wgLanguageCode;
+        $re = str_replace('/', '\\/', $is_regexp ? "(?:$mark)" : preg_quote($mark));
+        if (preg_match("/^\s*((?:<[^<>]*>\s*)*)$re/uis", $html, $m, PREG_OFFSET_CAPTURE)) {
+            $new = $m[1][0] . substr($html, strlen($m[0][0]));
+            /*
+             * We should slice array on 2 or 3 length
+             * according to empty items
+             */
+            $simple_question = wfMsgReal('easytests-parse-question', NULL, true, $wgLanguageCode, false);
+            if (preg_match("/^\s*((?:<[^<>]*>\s*)*)$simple_question/uis", $m[count($m) - 1][0]) and count($m) > 4) {
+                // Remove founding html and spaces
+                array_splice($m, 0, 3);
+            } else {
+                // Remove founding html
+                array_splice($m, 0, 2);
+            }
+            // set question type for hard questions
+            if (count($m) > 0 and self::findQuestionType($m, $wgLanguageCode)) {
+                $m[count($m) - 1]['type'] = self::findQuestionType($m, $wgLanguageCode);
+                // we need array with 2 items, so insert fake element
+                // * magic *
+                if (count($m) == 1) {
+                    array_unshift($m, array('', -1));
+                }
+            }
+
+        } elseif (preg_match("/$re((?:\s*<[^<>]*>)*)\s*$/uis", $html, $m, PREG_OFFSET_CAPTURE)) {
+            $new = substr($html, 0, $m[0][1]) . $m[count($m) - 1][0];
+            array_shift($m);
+            array_pop($m);
+        } else {
+            return false;
+        }
+        $new_document = self::loadDOM($new);
+        $new_element = $new_document->documentElement->childNodes->item(0)->childNodes->item(0);
+        $new_element = $document->importNode($new_element, true);
+        return array($new_element, $m);
+    }
+
+    private static function findQuestionType($array, $wgLanguageCode)
+    {
+        $pattern1 = wfMsgReal('easytests-parse-question-match', NULL, true, $wgLanguageCode, false);
+        $pattern2 = wfMsgReal('easytests-parse-question-parallel', NULL, true, $wgLanguageCode, false);
+        if (preg_match("/^\s*((?:<[^<>]*>\s*)*)$pattern1/uis", $array[count($array) - 1][0])) {
+            return 'order';
+        } elseif (preg_match("/^\s*((?:<[^<>]*>\s*)*)$pattern2/uis", $array[count($array) - 1][0])) {
+            return 'parallel';
+        }
+        return false;
+    }
+
+    /** Load HTML content into a DOMDocument
+     * @param $html
+     * @return DOMDocument
+     */
+    static function loadDOM($html)
+    {
+        $dom = new DOMDocument();
+        $oe = error_reporting();
+        error_reporting($oe & ~E_WARNING);
+        $dom->loadHTML("<?xml version='1.0' encoding='UTF-8'?>" . mb_convert_encoding($html, 'HTML-ENTITIES', 'UTF-8'));
+        error_reporting($oe);
+        return $dom;
+    }
+
+    /** Get list items of outer-level lists
+     * @param $element
+     * @return array
+     */
     static function getListItems($element)
     {
         if (!$element->childNodes->length)
@@ -217,27 +269,5 @@ class DOMParseUtils
             }
         }
         return $r;
-    }
-
-    /* Load HTML content into a DOMDocument */
-    static function loadDOM($html)
-    {
-        $dom = new DOMDocument();
-        $oe = error_reporting();
-        error_reporting($oe & ~E_WARNING);
-        $dom->loadHTML("<?xml version='1.0' encoding='UTF-8'?>" . mb_convert_encoding($html, 'HTML-ENTITIES', 'UTF-8'));
-        error_reporting($oe);
-        return $dom;
-    }
-
-    public static function findQuestionType($array, $wgLanguageCode) {
-        $pattern1 = wfMsgReal('easytests-parse-question-match', NULL, true, $wgLanguageCode, false);
-        $pattern2 = wfMsgReal('easytests-parse-question-parallel', NULL, true, $wgLanguageCode, false);
-        if (preg_match("/^\s*((?:<[^<>]*>\s*)*)$pattern1/uis", $array[count($array) - 1][0])){
-            return 'order';
-        }elseif (preg_match("/^\s*((?:<[^<>]*>\s*)*)$pattern2/uis", $array[count($array) - 1][0])){
-            return 'parallel';
-        }
-        return false;
     }
 }
