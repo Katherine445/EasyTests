@@ -43,6 +43,11 @@ class EasyTestsUpdater
     /* Parse wiki-text $text without TOC, heading numbers and EditSection links turned on */
     static $parser = NULL, $parserOptions;
 
+    /**
+     * @param $article
+     * @param $text
+     * @return mixed|null|string|string[]
+     */
     static function parse($article, $text)
     {
         global $wgUser;
@@ -66,6 +71,9 @@ class EasyTestsUpdater
         return $html;
     }
 
+    /**
+     * Get regular expressions
+     */
     static function getRegexps()
     {
         global $egEasyTestsContLang;
@@ -95,6 +103,11 @@ class EasyTestsUpdater
     }
 
     /* Transform quiz field value according to its type */
+    /**
+     * @param $field
+     * @param $value
+     * @return int|string
+     */
     static function transformFieldValue($field, $value)
     {
         $t = self::$test_field_types[$field];
@@ -113,6 +126,10 @@ class EasyTestsUpdater
         return $value;
     }
 
+    /**
+     * @param $s
+     * @return string
+     */
     static function textlog($s)
     {
         if (is_object($s))
@@ -121,6 +138,10 @@ class EasyTestsUpdater
     }
 
     /* Check last question for correctness */
+    /**
+     * @param $questions
+     * @param $log
+     */
     static function checkLastQuestion(&$questions, &$log)
     {
         // TODO: save answers order if question type != simple
@@ -419,6 +440,11 @@ class EasyTestsUpdater
     }
 
     /* Parse $text and update data of the quiz linked to article title */
+    /**
+     * @param $article
+     * @param $text
+     * @throws DBUnexpectedError
+     */
     static function updateQuiz($article, $text)
     {
         /*
@@ -522,6 +548,13 @@ class EasyTestsUpdater
     }
 
     /* A helper for updating many rows at once (MySQL-specific) */
+    /**
+     * @param $dbw
+     * @param $table
+     * @param $rows
+     * @param $fname
+     * @return mixed
+     */
     static function insertOrUpdate($dbw, $table, $rows, $fname)
     {
         global $wgDBtype;

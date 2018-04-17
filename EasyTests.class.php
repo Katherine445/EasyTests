@@ -4,8 +4,14 @@ require_once dirname(__FILE__) . '/includes/urandom.php';
 
 class EasyTestsPage extends SpecialPage
 {
+    /**
+     *
+     */
     const DEFAULT_OK_PERCENT = 80;
 
+    /**
+     * @var array
+     */
     static $modes = array(
         'show' => 1,
         'check' => 1,
@@ -15,8 +21,14 @@ class EasyTestsPage extends SpecialPage
         'getticket' => 1,
     );
 
+    /**
+     * @var array
+     */
     static $questionInfoCache = array();
 
+    /**
+     * @var null
+     */
     static $is_adm = NULL;
 
     /**
@@ -250,7 +262,7 @@ class EasyTestsPage extends SpecialPage
             // correct answers count for random selection
             $test['random_correct'] += $question['correct_count'] / count($question['choices']);
             // maximum total score
-            $test['max_score'] += $question['score_correct'];
+            $test['max_score'] += $question['correct_count'] * $question['score_correct'];
         }
 
         return $test;
@@ -291,7 +303,7 @@ class EasyTestsPage extends SpecialPage
             /* Calculate scores */
             if ($question['correct_count']) {
                 // add 1/n for correct answers
-                $question['score_correct'] = 1/$question['correct_count'];
+                $question['score_correct'] = 1 / $question['correct_count'];
 //                $question['score_correct'] = 1;
                 // subtract 1/(m-n) for incorrect answers, so universal mean would be 0
                 $question['score_incorrect'] = $question['correct_count'] < count($question['choices']) ? -$question['score_correct'] / (count($question['choices']) - $question['correct_count']) : 0;
@@ -685,12 +697,17 @@ class EasyTestsPage extends SpecialPage
             'cs_ticket' => $ticket_id,
         ), __FUNCTION__);
         while ($row = $dbr->fetchObject($result)) {
+            $row = (array)$row;
             $answers[$row['cs_question_hash']] = (array)$row;
         }
         $dbr->freeResult($result);
         return $answers;
     }
 
+    /**
+     * @param $test
+     * @return array|mixed
+     */
     static function formDef($test)
     {
         $fields = trim($test['test_user_details']);
@@ -854,23 +871,29 @@ class EasyTestsPage extends SpecialPage
 
     /**
      * We will use it also in TUTOR mode to get question with choices.
+     * @param array $question
+     * @param int $qn_key
+     * @param bool $inputs
+     * @return string
      */
-    static function getQuestionHtml($question, $qn_key, $inputs = false)
+    static function getQuestionHtml($question = array(), $qn_key = 0, $inputs = false)
     {
-        $html = '';
         $html = self::xelement('div', array('class' => 'easytests-question'), $question['qn_text']);
         $choices = '';
         switch ($question['qn_type']) {
             case 'free-text':
                 if ($inputs) {
                     $html .= wfMsg('easytests-freetext') . ' ' . self::xelement('input', array('name' => "a[$qn_key]", 'type' => 'text'));
+                }else{
+                    $html .= self::xelement('ol', array('class' => 'easytests-choices'), $question['choices'][0]['ch_text']);
                 }
                 break;
             case 'order':
                 $options = self::buildOptionsArray($question['choices'], $question['qn_type']);
                 foreach ($question['choices'] as $i => $choice) {
+                    $ch_num = $choice['ch_num'];
                     $h = $choice['ch_text'] . '&nbsp;' . self::xelement('select', array(
-                            'name' => "a[$qn_key]",
+                            'name' => "a[$qn_key][$ch_num]",
                         ), $options);
 
                     $choices .= self::xelement('li', array('class' => 'easytests-choice'), $h);
@@ -880,8 +903,9 @@ class EasyTestsPage extends SpecialPage
             case 'parallel':
                 $options = self::buildOptionsArray($question['choices'], $question['qn_type']);
                 foreach ($question['choices'] as $i => $choice) {
+                    $ch_num = $choice['ch_num'];
                     $h = $choice['ch_text'] . '&nbsp;' . self::xelement('select', array(
-                            'name' => "a[$qn_key]",
+                            'name' => "a[$qn_key][$ch_num]",
                         ), $options);
 
                     $choices .= self::xelement('li', array('class' => 'easytests-choice'), $h);
@@ -932,7 +956,7 @@ class EasyTestsPage extends SpecialPage
     private static function buildOptionsArray($choices, $question_type)
     {
         $options_arr = '';
-        switch($question_type) {
+        switch ($question_type) {
             case 'order' :
                 foreach ($choices as $key => $value) {
                     $options_arr .= Xml::element('option', array(
@@ -942,11 +966,11 @@ class EasyTestsPage extends SpecialPage
                 break;
             case 'parallel' :
                 usort($choices, function ($a, $b) {
-                    if(intval($a['ch_num']) > intval($b['ch_num'])) {
+                    if (intval($a['ch_num']) > intval($b['ch_num'])) {
                         return 1;
-                    }elseif (intval($a['ch_num']) < intval($b['ch_num'])) {
+                    } elseif (intval($a['ch_num']) < intval($b['ch_num'])) {
                         return -1;
-                    }else {
+                    } else {
                         return 0;
                     }
                 });
@@ -1021,52 +1045,92 @@ $(window).load(function()
 EOT;
     }
 
-    /** Load answers from POST data, save them into DB and return as the result */
-    static function checkAnswers($test, $ticket)
+    /** Load answers from POST data, save them into DB and return as the result
+     *
+     * @param array $test
+     * @param array $ticket
+     * @return array
+     * @throws DBQueryError
+     */
+    static function checkAnswers($test = array(), $ticket = array())
     {
         $answers = array();
         $rows = array();
+
         if (!empty($_POST['a_values'])) {
             $_POST['a'] = json_decode($_POST['a_values'], true);
         }
-        foreach ($test['questions'] as $i => $q) {
+        foreach ($test['questions'] as $i => $question) {
             if (!empty($_POST['a'][$i])) {
-                $n = $_POST['a'][$i];
-                switch ($q['correct_count']) {
-                    case ($q['correct_count'] == count($q['choices']) and count($q['choices']) == 1):
-                        if ($q['choices'] == 1) {
-                            $n = trim($n);
-                            $is_correct = false;
-                            foreach ($q['choices'] as $ch) {
-                                if ($n === $ch['ch_text']) {
-                                    $is_correct = true;
-                                }
-                            }
-                            $text = $n;
-                            $num = 0;
-                        } else {
-                            continue;
+
+                $text = NULL;
+                $num = 0;
+                $user_answers = $_POST['a'][$i];
+                $is_correct = false;
+                $user_answer_stats = [];
+
+                switch ($question['qn_type']) {
+                    case 'free-text':
+                        $user_answers = trim($user_answers);
+                        if (strtolower($user_answers) === strtolower($question['choices'][0]['ch_text'])) {
+                            $is_correct = true;
                         }
+                        $user_answer_stats[] = array(
+                            'user_answ' => $user_answers,
+                            'correct' => $is_correct
+                        );
+
+                        $text = serialize($user_answer_stats);
                         break;
-                    case($q['correct_count'] <= count($q['choices']) and $q['correct_count'] > 1):
-                        foreach ($n as $key => $val) {
-                            $is_correct = $q['choices'][$val - 1]['ch_correct'] ? 1 : 0;
-                            $text = NULL;
-                            $num = $q['choices'][$val - 1]['ch_num'];
+                    case 'order':
+                        foreach ($user_answers as $key => $val) {
+                            $is_correct = $question['correct_choices'][$key - 1]['ch_order_index'] == $val ? true : false;
+
+                            $user_answer_stats[] = array(
+                                'ch_numb' => $question['correct_choices'][$key - 1]['ch_num'],
+                                'user_answ' => $val,
+                                'correct' => $is_correct
+                            );
                         }
+                        $text = serialize($user_answer_stats);
+                        break;
+                    case 'parallel':
+                        foreach ($user_answers as $key => $val) {
+                            $is_correct = $question['correct_choices'][$key - 1]['ch_parallel'] == $val ? true : false;
+
+                            $user_answer_stats[] = array(
+                                'ch_numb' => $question['correct_choices'][$key - 1]['ch_num'],
+                                'user_answ' => $val,
+                                'correct' => $is_correct
+                            );
+                        }
+                        $text = serialize($user_answer_stats);
                         break;
                     default:
-                        $is_correct = $q['choices'][$n - 1]['ch_correct'] ? 1 : 0;
-                        $text = NULL;
-                        $num = $q['choices'][$n - 1]['ch_num'];
+                        //multiple corrects
+                        if ($question['correct_count'] > 1) {
+                            foreach ($user_answers as $key => $val) {
+                                $user_answer_stats[] = array(
+                                    'ch_numb' => $question['choices'][$val - 1]['ch_num'],
+                                    'correct' => $question['choices'][$val - 1]['ch_correct'] ? 1 : 0
+                                );
+                            }
+                            $text = serialize($user_answer_stats);
+                        } else {
+                            // one correct answer
+                            $is_correct = $question['choices'][$user_answers - 1]['ch_correct'] ? 1 : 0;
+                            $num = $question['choices'][$user_answers - 1]['ch_num'];
+                        }
+                        break;
                 }
 
                 /* Build rows for saving answers into database */
-                $rows[] = $answers[$q['qn_hash']] = array(
+                $rows[] = $answers[$question['qn_hash']] = array(
                     'cs_ticket' => $ticket['tk_id'],
-                    'cs_question_hash' => $q['qn_hash'],
+                    'cs_question_hash' => $question['qn_hash'],
                     'cs_choice_num' => $num,
                     'cs_text' => $text,
+                    // TODO: remove this field from DB
                     'cs_correct' => $is_correct,
                 );
             }
@@ -1076,13 +1140,26 @@ EOT;
         return $answers;
     }
 
-    /** Calculate scores based on $testresult['answers'] ($hash => $num) */
+    /** Calculate scores based on $testresult['answers'] ($hash => $num)
+     * @param $testresult
+     * @param $test
+     */
     static function calculateScores(&$testresult, &$test)
     {
+        $correct_score = 0;
         foreach ($testresult['answers'] as $hash => $row) {
-            $c = $row['cs_correct'] ? 1 : 0;
-            $testresult['correct_count'] += $c;
-            $testresult['score'] += $test['questionByHash'][$hash][$c ? 'score_correct' : 'score_incorrect'];
+            if ($row['cs_text']) {
+                $answers_stats = unserialize($row['cs_text']);
+                foreach ($answers_stats as $key => $answer_stats) {
+                    $correct_score += $answer_stats['correct'] ? $test['questionByHash'][$hash]['score_correct'] : 0;
+                }
+                $testresult['correct_count'] += $correct_score > 0 ? 1 : 0;
+                $testresult['score'] += $correct_score > 0 ? $correct_score : $test['questionByHash'][$hash]['score_incorrect'];
+            } else {
+                $c = $row['cs_correct'] ? 1 : 0;
+                $testresult['correct_count'] += $c;
+                $testresult['score'] += $test['questionByHash'][$hash][$c ? 'score_correct' : 'score_incorrect'];
+            }
         }
         $testresult['correct_percent'] = round($testresult['correct_count'] / count($test['questions']) * 100, 1);
         $testresult['score_percent'] = round($testresult['score'] / $test['max_score'] * 100, 1);
@@ -1240,22 +1317,29 @@ EOT;
         $html = '';
         foreach ($test['questions'] as $k => $q) {
             $row = @$testresult['answers'][$q['qn_hash']];
-            if ($row && $row['cs_correct'])
+            if ($row && $row['cs_correct']) {
                 continue;
+            }
             $items[$k] = true;
             $correct = $q['correct_choices'][0];
             $html .= Xml::element('hr');
             $html .= self::xelement('a', array('name' => "q$k"), '', false);
-            if ($is_adm)
+            if ($is_adm) {
                 $stats = self::questionStatsHtml($q['correct_tries'], $q['tries']);
-            else
+            } else {
                 $stats = '';
+            }
             $html .= self::xelement('h3', NULL, wfMsg('easytests-question', $k + 1) . $stats);
             //$html .= self::xelement('div', array('class' => 'easytests-question'), $q['qn_text']);
             $html .= self::getQuestionHtml($q, $k);
             if ($row) {
                 $html .= self::xelement('h4', NULL, wfMsg('easytests-your-answer'));
-                $html .= self::xelement('div', array('class' => 'easytests-your-answer'), !empty($row['cs_choice_num']) ? $q['choiceByNum'][$row['cs_choice_num']]['ch_text'] : $row['cs_text']);
+                if($row['cs_text']) {
+                    $answ = self::htmlShowAnswers($row['cs_text'], $test['questionByHash'][$row['cs_question_hash']]);
+                }else {
+                    $answ = !empty($row['cs_choice_num']) ? $q['choiceByNum'][$row['cs_choice_num']]['ch_text'] : $row['cs_text'];
+                }
+                $html .= self::xelement('div', array('class' => 'easytests-your-answer'), $answ);
             }
             $html .= self::xelement('h4', NULL, wfMsg('easytests-right-answer'));
             $html .= self::xelement('div', array('class' => 'easytests-right-answer'), $correct['ch_text']);
@@ -1270,6 +1354,28 @@ EOT;
                 $html;
         }
         return $html;
+    }
+
+    /**
+     * @param string $row_text
+     * @param string $qn_type
+     * @return string
+     */
+    private static function htmlShowAnswers($row_text = '', $question){
+        $answers = unserialize($row_text);
+        $user_answers = '';
+        usort($answers,function ($a, $b){
+            if($a['ch_numb'] > $b['ch_numb'])
+                return 1;
+            elseif ($a['ch_numb'] < $b['ch_numb'])
+                return -1;
+            else return 0;
+        });
+        //TODO: fix error
+        foreach ($answers as $key => $answer) {
+            $user_answers .= Xml::element('p',null,  $question['choiceByNum'][$answer['ch_numb']]['ch_text'] . '-' . $answer['user_answ']);
+        }
+        return $user_answers;
     }
 
     /** Draws a QR code with ticket check link */
@@ -1387,7 +1493,7 @@ EOT;
             'SQL_CALC_FOUND_ROWS',
         ));
         while ($row = $dbr->fetchObject($result)) {
-            $row = (array) $row;
+            $row = (array)$row;
             /* Recalculate scores */
             if ($row['tk_end_time'] !== NULL && $row['tk_score'] === NULL)
                 self::recalcTicket($row);
@@ -1691,6 +1797,9 @@ EOT;
         return $table;
     }
 
+    /**
+     * @param $test
+     */
     static function showTicket($test)
     {
         global $wgOut, $wgTitle;
