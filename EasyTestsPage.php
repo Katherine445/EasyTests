@@ -54,8 +54,9 @@ class EasyTestsPage extends SpecialPage
         $wgOut->addExtensionStyle("$wgScriptPath/extensions/" . basename(dirname(__FILE__)) . "/css/easytest-page.css");
         /* Load the test without questions */
         $quiz = self::loadTest(array('name' => $test_title), NULL, true);
-        if (!$quiz)
-            return;
+        if (!$quiz) {
+          return;
+        }
         $s = Title::newFromText('Special:EasyTests');
         $actions = array(
             'try' => $s->getFullUrl(array('id' => $quiz['test_id']) + (array())),
@@ -90,14 +91,21 @@ class EasyTestsPage extends SpecialPage
             $wgOut->addHTML($html);
         }
     }
-
-    /**
-     * Load a test from database. Optionally shuffle/limit questions and answers,
-     * compute variant ID (sequence hash) and scores.
-     * $cond = array('id' => int $testId)
-     * or $cond = array('name' => string $testName)
-     * or $cond = array('name' => Title $testTitle)
-     */
+  
+  /**
+   * Load a test from database. Optionally shuffle/limit questions and answers,
+   * compute variant ID (sequence hash) and scores.
+   * $cond = array('id' => int $testId)
+   * or $cond = array('name' => string $testName)
+   * or $cond = array('name' => Title $testTitle)
+   *
+   * @param      $cond
+   * @param null $variant
+   * @param bool $without_questions
+   *
+   * @return array
+   * @throws \DBUnexpectedError
+   */
     static function loadTest($cond, $variant = NULL, $without_questions = false)
     {
         global $wgOut;
@@ -113,159 +121,162 @@ class EasyTestsPage extends SpecialPage
             $where = array('test_page_title' => $cond['name']);
         }
         $result = $dbr->select('et_test', '*', $where, __METHOD__);
-        $test = (array)$dbr->fetchObject($result);
+        $test = $dbr->fetchObject($result);
         $dbr->freeResult($result);
 
-        if (!$test)
-            return NULL;
-
-        $id = $test['test_id'];
-
-        // decode entities inside test_name as it is used inside HTML <title>
-        $test['test_name'] = html_entity_decode($test['test_name']);
-
-        // default OK%
-        if (!isset($test['ok_percent']) || $test['ok_percent'] <= 0)
+        if ($test) {
+          $test = (array) $test;
+          $id = $test['test_id'];
+  
+          // decode entities inside test_name as it is used inside HTML <title>
+          $test['test_name'] = html_entity_decode($test['test_name']);
+  
+          // default OK%
+          if (!isset($test['ok_percent']) || $test['ok_percent'] <= 0)
             $test['ok_percent'] = self::DEFAULT_OK_PERCENT;
-
-        // do not load questions if $without_questions == true
-        if ($without_questions)
+  
+          // do not load questions if $without_questions == true
+          if ($without_questions) {
             return $test;
-
-        if ($variant) {
+          }
+  
+          if ($variant) {
             $variant = @unserialize($variant);
             if (!is_array($variant))
-                $variant = NULL;
+              $variant = null;
             else {
-                $qhashes = array();
-                foreach ($variant as $question)
-                    $qhashes[] = $question[0];
+              $qhashes = array();
+              foreach ($variant as $question)
+                $qhashes[] = $question[0];
             }
-        }
-
-        $fields = 'et_question.*, IFNULL(COUNT(cs_correct),0) tries, IFNULL(SUM(cs_correct),0) correct_tries';
-        $tables = array('et_question', 'et_choice_stats', 'et_question_test');
-        $where = array();
-        $options = array('GROUP BY' => 'qn_hash', 'ORDER BY' => 'qt_num');
-        $joins = array(
-            'et_choice_stats' => array('LEFT JOIN', array('cs_question_hash=qn_hash')),
-            'et_question_test' => array('INNER JOIN', array('qt_question_hash=qn_hash', 'qt_test_id' => $id)),
-        );
-
-        if ($variant) {
+          }
+  
+          $fields = 'et_question.*, IFNULL(COUNT(cs_correct),0) tries, IFNULL(SUM(cs_correct),0) correct_tries';
+          $tables = array('et_question', 'et_choice_stats', 'et_question_test');
+          $where = array();
+          $options = array('GROUP BY' => 'qn_hash', 'ORDER BY' => 'qt_num');
+          $joins = array(
+              'et_choice_stats'  => array('LEFT JOIN', array('cs_question_hash=qn_hash')),
+              'et_question_test' => array('INNER JOIN', array('qt_question_hash=qn_hash', 'qt_test_id' => $id)),
+          );
+  
+          if ($variant) {
             /* Select questions with known hashes for loading a specific variant.
                This is needed because quiz set of questions can change over time,
                but we want to always display the known variant. */
             $where['qn_hash'] = $qhashes;
             $joins['et_question_test'][0] = 'LEFT JOIN';
-        }
-
-        /* Read questions: */
-        $result = $dbr->select($tables, $fields, $where, __METHOD__, $options, $joins);
-        if ($dbr->numRows($result) <= 0)
-            return NULL;
-
-        $rows = array();
-        while ($question = $dbr->fetchObject($result)) {
-            $question = (array)$question;
+          }
+  
+          /* Read questions: */
+          $result = $dbr->select($tables, $fields, $where, __METHOD__, $options, $joins);
+          if ($dbr->numRows($result) <= 0)
+            return null;
+  
+          $rows = array();
+          while ($question = $dbr->fetchObject($result)) {
+            $question = (array) $question;
             if (!$question['correct_tries'])
-                $question['correct_tries'] = 0;
+              $question['correct_tries'] = 0;
             if (!$question['tries'])
-                $question['tries'] = 0;
-
+              $question['tries'] = 0;
+    
             if (!$variant && $test['test_autofilter_min_tries'] > 0 &&
                 $question['tries'] >= $test['test_autofilter_min_tries'] &&
                 $question['correct_tries'] / $question['tries'] >= $test['test_autofilter_success_percent'] / 100.0
             ) {
-                /* Statistics tells us this question is too simple, skip it */
-                wfDebug(__CLASS__ . ': Skipping ' . $question['qn_hash'] . ', because correct percent = ' . $question['correct_tries'] . '/' . $question['tries'] . ' >= ' . $test['test_autofilter_success_percent'] . "%\n");
-                continue;
+              /* Statistics tells us this question is too simple, skip it */
+              wfDebug(__CLASS__ . ': Skipping ' . $question['qn_hash'] . ', because correct percent = ' . $question['correct_tries'] . '/' . $question['tries'] . ' >= ' . $test['test_autofilter_success_percent'] . "%\n");
+              continue;
             }
             $question['choices'] = array();
             $question['correct_count'] = 0;
             $rows[$question['qn_hash']] = $question;
-        }
-
-        /* Optionally shuffle and limit questions */
-        if (!$variant && ($test['test_shuffle_questions'] || $test['test_limit_questions'])) {
+          }
+  
+          /* Optionally shuffle and limit questions */
+          if (!$variant && ($test['test_shuffle_questions'] || $test['test_limit_questions'])) {
             $new = $rows;
             if ($test['test_shuffle_questions'])
-                shuffle($new);
+              shuffle($new);
             if ($test['test_limit_questions'])
-                array_splice($new, $test['test_limit_questions']);
+              array_splice($new, $test['test_limit_questions']);
             $rows = array();
             foreach ($new as $question)
-                $rows[$question['qn_hash']] = $question;
-        } elseif ($variant) {
+              $rows[$question['qn_hash']] = $question;
+          } elseif ($variant) {
             $new = array();
             foreach ($variant as $question) {
-                if ($rows[$question[0]]) {
-                    $rows[$question[0]]['ch_order'] = $question[1];
-                    $new[$question[0]] = &$rows[$question[0]];
-                }
+              if ($rows[$question[0]]) {
+                $rows[$question[0]]['ch_order'] = $question[1];
+                $new[$question[0]] = &$rows[$question[0]];
+              }
             }
             $rows = $new;
-        }
-
-        /* Read choices: */
-        if ($rows) {
+          }
+  
+          /* Read choices: */
+          if ($rows) {
             $result = $dbr->select(
                 'et_choice', '*', array('ch_question_hash' => array_keys($rows)),
                 __METHOD__, array('ORDER BY' => 'ch_question_hash, ch_num')
             );
-            $question = NULL;
+            $question = null;
             while ($choice = $dbr->fetchObject($result)) {
-                $choice = (array)$choice;
-                if (!$question) {
-                    $question = &$rows[$choice['ch_question_hash']];
-                } elseif ($question['qn_hash'] != $choice['ch_question_hash']) {
-                    if (!self::finalizeQuestionRow($question, $variant && true, $test['test_shuffle_choices'])) {
-                        unset($rows[$question['qn_hash']]);
-                    }
-                    $question = &$rows[$choice['ch_question_hash']];
+              $choice = (array) $choice;
+              if (!$question) {
+                $question = &$rows[$choice['ch_question_hash']];
+              } elseif ($question['qn_hash'] != $choice['ch_question_hash']) {
+                if (!self::finalizeQuestionRow($question, $variant && true, $test['test_shuffle_choices'])) {
+                  unset($rows[$question['qn_hash']]);
                 }
-                $question['choiceByNum'][$choice['ch_num']] = $choice;
-                $question['choices'][] = &$question['choiceByNum'][$choice['ch_num']];
-                if ($choice['ch_correct']) {
-                    $question['correct_count']++;
-                    $question['correct_choices'][] = &$question['choiceByNum'][$choice['ch_num']];
-                }
+                $question = &$rows[$choice['ch_question_hash']];
+              }
+              $question['choiceByNum'][$choice['ch_num']] = $choice;
+              $question['choices'][] = &$question['choiceByNum'][$choice['ch_num']];
+              if ($choice['ch_correct']) {
+                $question['correct_count'] ++;
+                $question['correct_choices'][] = &$question['choiceByNum'][$choice['ch_num']];
+              }
             }
             if (!self::finalizeQuestionRow($question, $variant && true, $test['test_shuffle_choices']))
-                unset($rows[$question['qn_hash']]);
+              unset($rows[$question['qn_hash']]);
             unset($question);
             $dbr->freeResult($result);
-        }
-
-        /* Finally, build question array for the test */
-        $test['questions'] = array();
-        foreach ($rows as $question) {
+          }
+  
+          /* Finally, build question array for the test */
+          $test['questions'] = array();
+          foreach ($rows as $question) {
             $test['questionByHash'][$question['qn_hash']] = $question;
             $test['questions'][] = &$test['questionByHash'][$question['qn_hash']];
-        }
-
-        // a variant ID is computed using hashes of selected questions and sequences of their answers
-        $variant = array();
-        foreach ($test['questions'] as $question) {
+          }
+  
+          // a variant ID is computed using hashes of selected questions and sequences of their answers
+          $variant = array();
+          foreach ($test['questions'] as $question) {
             $v = array($question['qn_hash']);
             foreach ($question['choices'] as $c)
-                $v[1][] = $c['ch_num'];
+              $v[1][] = $c['ch_num'];
             $variant[] = $v;
-        }
-        $test['variant_hash'] = serialize($variant);
-        $test['variant_hash_crc32'] = sprintf("%u", crc32($test['variant_hash']));
-        $test['variant_hash_md5'] = md5($test['variant_hash']);
-
-        $test['random_correct'] = 0;
-        $test['max_score'] = 0;
-        foreach ($test['questions'] as $question) {
+          }
+          $test['variant_hash'] = serialize($variant);
+          $test['variant_hash_crc32'] = sprintf("%u", crc32($test['variant_hash']));
+          $test['variant_hash_md5'] = md5($test['variant_hash']);
+  
+          $test['random_correct'] = 0;
+          $test['max_score'] = 0;
+          foreach ($test['questions'] as $question) {
             // correct answers count for random selection
             $test['random_correct'] += $question['correct_count'] / count($question['choices']);
             // maximum total score
             $test['max_score'] += $question['correct_count'] * $question['score_correct'];
+          }
+  
+          return $test;
+        }else {
+          return null;
         }
-
-        return $test;
     }
 
     /**
@@ -1355,12 +1366,13 @@ EOT;
         }
         return $html;
     }
-
-    /**
-     * @param string $row_text
-     * @param string $qn_type
-     * @return string
-     */
+  
+  /**
+   * @param string $row_text
+   * @param        $question
+   *
+   * @return string
+   */
     private static function htmlShowAnswers($row_text = '', $question){
         $answers = unserialize($row_text);
         $user_answers = '';
