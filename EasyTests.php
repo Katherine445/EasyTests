@@ -35,8 +35,8 @@ $wgExtensionCredits['specialpage'][] = array(
 $wgExtensionMessagesFiles['EasyTests'] = $dir . '/i18n/EasyTests.i18n.php';
 $wgSpecialPages['EasyTests'] = 'EasyTestsPage';
 $wgAutoloadClasses += array(
-    'EasyTestsPage' => $dir . 'EasyTests.class.php',
-    'EasyTestsUpdater' => $dir . 'EasyTests.updater.php',
+    'EasyTestsPage' => $dir . 'EasyTestsPage.php',
+    'EasyTestsUpdater' => $dir . 'EasyTestsUpdater.php',
     'DOMParseUtils' => $dir . '/utilites/DOMParseUtils.php',
 );
 $wgHooks['LoadExtensionSchemaUpdates'][] = 'EasyTests::LoadExtensionSchemaUpdates';
