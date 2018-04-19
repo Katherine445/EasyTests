@@ -929,6 +929,7 @@ class EasyTestsPage extends SpecialPage
 
                         $choices .= self::xelement('li', array('class' => 'easytests-choice'), $h);
                     }
+                    $html .= self::xelement('ol', array('class' => 'easytests-choices'), $choices);
                 } else {
                     $print_options = '<div class="print-mode-list">' . self::xelement('ol', array(
                             'class' => 'easytests-choices'
@@ -940,8 +941,8 @@ class EasyTestsPage extends SpecialPage
                         $choices .= self::xelement('li', array('class' => 'easytests-choice'), $h);
                     }
                     $print_qn = '<div>'.self::xelement('ol', array('class' => 'easytests-choices'), $choices).'</div>';
+                    $html .= '<div class="easytest-parallel-wrapper">' . $print_qn . $print_options . '</div>';
                 }
-                $html .= '<div class="easytest-parallel-wrapper">' . $print_qn . $print_options . '</div>';
                 break;
             default:
                 foreach ($question['choices'] as $i => $choice) {
@@ -982,6 +983,7 @@ class EasyTestsPage extends SpecialPage
      *
      * @param $choices
      * @param $question_type
+     * @param bool $inputs
      * @return string
      */
     private static function buildOptionsArray($choices, $question_type, $inputs = true)
