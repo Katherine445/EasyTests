@@ -940,7 +940,7 @@ class EasyTestsPage extends SpecialPage
                             ), '&nbsp;');
                         $choices .= self::xelement('li', array('class' => 'easytests-choice'), $h);
                     }
-                    $print_qn = '<div>'.self::xelement('ol', array('class' => 'easytests-choices'), $choices).'</div>';
+                    $print_qn = '<div>' . self::xelement('ol', array('class' => 'easytests-choices'), $choices) . '</div>';
                     $html .= '<div class="easytest-parallel-wrapper">' . $print_qn . $print_options . '</div>';
                 }
                 break;
