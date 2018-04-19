@@ -1,21 +1,2 @@
-#easytests-parselog div {
-    font-family: monospace;
-}
-
-#easytests-parselog pre {
-    padding: 0;
-}
-
-.easytests-log-error {
-    color: white;
-    background-color: red;
-}
-
-.easytests-log-warn {
-    color: black;
-    background-color: #ffff00;
-}
-
-.easytests-log-info {
-    color: #008000;
-}
+#easytests-parselog div{font-family:monospace}#easytests-parselog pre{padding:0}.easytests-log-error{color:#fff;background-color:red}.easytests-log-warn{color:#000;background-color:#ff0}.easytests-log-info{color:green}
+/*# sourceMappingURL=easytest-page.css.map */

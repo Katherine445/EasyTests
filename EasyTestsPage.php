@@ -55,7 +55,7 @@ class EasyTestsPage extends SpecialPage
         /* Load the test without questions */
         $quiz = self::loadTest(array('name' => $test_title), NULL, true);
         if (!$quiz) {
-          return;
+            return;
         }
         $s = Title::newFromText('Special:EasyTests');
         $actions = array(
@@ -91,21 +91,21 @@ class EasyTestsPage extends SpecialPage
             $wgOut->addHTML($html);
         }
     }
-  
-  /**
-   * Load a test from database. Optionally shuffle/limit questions and answers,
-   * compute variant ID (sequence hash) and scores.
-   * $cond = array('id' => int $testId)
-   * or $cond = array('name' => string $testName)
-   * or $cond = array('name' => Title $testTitle)
-   *
-   * @param      $cond
-   * @param null $variant
-   * @param bool $without_questions
-   *
-   * @return array
-   * @throws \DBUnexpectedError
-   */
+
+    /**
+     * Load a test from database. Optionally shuffle/limit questions and answers,
+     * compute variant ID (sequence hash) and scores.
+     * $cond = array('id' => int $testId)
+     * or $cond = array('name' => string $testName)
+     * or $cond = array('name' => Title $testTitle)
+     *
+     * @param      $cond
+     * @param null $variant
+     * @param bool $without_questions
+     *
+     * @return array
+     * @throws \DBUnexpectedError
+     */
     static function loadTest($cond, $variant = NULL, $without_questions = false)
     {
         global $wgOut;
@@ -125,157 +125,157 @@ class EasyTestsPage extends SpecialPage
         $dbr->freeResult($result);
 
         if ($test) {
-          $test = (array) $test;
-          $id = $test['test_id'];
-  
-          // decode entities inside test_name as it is used inside HTML <title>
-          $test['test_name'] = html_entity_decode($test['test_name']);
-  
-          // default OK%
-          if (!isset($test['ok_percent']) || $test['ok_percent'] <= 0)
-            $test['ok_percent'] = self::DEFAULT_OK_PERCENT;
-  
-          // do not load questions if $without_questions == true
-          if ($without_questions) {
-            return $test;
-          }
-  
-          if ($variant) {
-            $variant = @unserialize($variant);
-            if (!is_array($variant))
-              $variant = null;
-            else {
-              $qhashes = array();
-              foreach ($variant as $question)
-                $qhashes[] = $question[0];
+            $test = (array)$test;
+            $id = $test['test_id'];
+
+            // decode entities inside test_name as it is used inside HTML <title>
+            $test['test_name'] = html_entity_decode($test['test_name']);
+
+            // default OK%
+            if (!isset($test['ok_percent']) || $test['ok_percent'] <= 0)
+                $test['ok_percent'] = self::DEFAULT_OK_PERCENT;
+
+            // do not load questions if $without_questions == true
+            if ($without_questions) {
+                return $test;
             }
-          }
-  
-          $fields = 'et_question.*, IFNULL(COUNT(cs_correct),0) tries, IFNULL(SUM(cs_correct),0) correct_tries';
-          $tables = array('et_question', 'et_choice_stats', 'et_question_test');
-          $where = array();
-          $options = array('GROUP BY' => 'qn_hash', 'ORDER BY' => 'qt_num');
-          $joins = array(
-              'et_choice_stats'  => array('LEFT JOIN', array('cs_question_hash=qn_hash')),
-              'et_question_test' => array('INNER JOIN', array('qt_question_hash=qn_hash', 'qt_test_id' => $id)),
-          );
-  
-          if ($variant) {
-            /* Select questions with known hashes for loading a specific variant.
-               This is needed because quiz set of questions can change over time,
-               but we want to always display the known variant. */
-            $where['qn_hash'] = $qhashes;
-            $joins['et_question_test'][0] = 'LEFT JOIN';
-          }
-  
-          /* Read questions: */
-          $result = $dbr->select($tables, $fields, $where, __METHOD__, $options, $joins);
-          if ($dbr->numRows($result) <= 0)
-            return null;
-  
-          $rows = array();
-          while ($question = $dbr->fetchObject($result)) {
-            $question = (array) $question;
-            if (!$question['correct_tries'])
-              $question['correct_tries'] = 0;
-            if (!$question['tries'])
-              $question['tries'] = 0;
-    
-            if (!$variant && $test['test_autofilter_min_tries'] > 0 &&
-                $question['tries'] >= $test['test_autofilter_min_tries'] &&
-                $question['correct_tries'] / $question['tries'] >= $test['test_autofilter_success_percent'] / 100.0
-            ) {
-              /* Statistics tells us this question is too simple, skip it */
-              wfDebug(__CLASS__ . ': Skipping ' . $question['qn_hash'] . ', because correct percent = ' . $question['correct_tries'] . '/' . $question['tries'] . ' >= ' . $test['test_autofilter_success_percent'] . "%\n");
-              continue;
-            }
-            $question['choices'] = array();
-            $question['correct_count'] = 0;
-            $rows[$question['qn_hash']] = $question;
-          }
-  
-          /* Optionally shuffle and limit questions */
-          if (!$variant && ($test['test_shuffle_questions'] || $test['test_limit_questions'])) {
-            $new = $rows;
-            if ($test['test_shuffle_questions'])
-              shuffle($new);
-            if ($test['test_limit_questions'])
-              array_splice($new, $test['test_limit_questions']);
-            $rows = array();
-            foreach ($new as $question)
-              $rows[$question['qn_hash']] = $question;
-          } elseif ($variant) {
-            $new = array();
-            foreach ($variant as $question) {
-              if ($rows[$question[0]]) {
-                $rows[$question[0]]['ch_order'] = $question[1];
-                $new[$question[0]] = &$rows[$question[0]];
-              }
-            }
-            $rows = $new;
-          }
-  
-          /* Read choices: */
-          if ($rows) {
-            $result = $dbr->select(
-                'et_choice', '*', array('ch_question_hash' => array_keys($rows)),
-                __METHOD__, array('ORDER BY' => 'ch_question_hash, ch_num')
-            );
-            $question = null;
-            while ($choice = $dbr->fetchObject($result)) {
-              $choice = (array) $choice;
-              if (!$question) {
-                $question = &$rows[$choice['ch_question_hash']];
-              } elseif ($question['qn_hash'] != $choice['ch_question_hash']) {
-                if (!self::finalizeQuestionRow($question, $variant && true, $test['test_shuffle_choices'])) {
-                  unset($rows[$question['qn_hash']]);
+
+            if ($variant) {
+                $variant = @unserialize($variant);
+                if (!is_array($variant))
+                    $variant = null;
+                else {
+                    $qhashes = array();
+                    foreach ($variant as $question)
+                        $qhashes[] = $question[0];
                 }
-                $question = &$rows[$choice['ch_question_hash']];
-              }
-              $question['choiceByNum'][$choice['ch_num']] = $choice;
-              $question['choices'][] = &$question['choiceByNum'][$choice['ch_num']];
-              if ($choice['ch_correct']) {
-                $question['correct_count'] ++;
-                $question['correct_choices'][] = &$question['choiceByNum'][$choice['ch_num']];
-              }
             }
-            if (!self::finalizeQuestionRow($question, $variant && true, $test['test_shuffle_choices']))
-              unset($rows[$question['qn_hash']]);
-            unset($question);
-            $dbr->freeResult($result);
-          }
-  
-          /* Finally, build question array for the test */
-          $test['questions'] = array();
-          foreach ($rows as $question) {
-            $test['questionByHash'][$question['qn_hash']] = $question;
-            $test['questions'][] = &$test['questionByHash'][$question['qn_hash']];
-          }
-  
-          // a variant ID is computed using hashes of selected questions and sequences of their answers
-          $variant = array();
-          foreach ($test['questions'] as $question) {
-            $v = array($question['qn_hash']);
-            foreach ($question['choices'] as $c)
-              $v[1][] = $c['ch_num'];
-            $variant[] = $v;
-          }
-          $test['variant_hash'] = serialize($variant);
-          $test['variant_hash_crc32'] = sprintf("%u", crc32($test['variant_hash']));
-          $test['variant_hash_md5'] = md5($test['variant_hash']);
-  
-          $test['random_correct'] = 0;
-          $test['max_score'] = 0;
-          foreach ($test['questions'] as $question) {
-            // correct answers count for random selection
-            $test['random_correct'] += $question['correct_count'] / count($question['choices']);
-            // maximum total score
-            $test['max_score'] += $question['correct_count'] * $question['score_correct'];
-          }
-  
-          return $test;
-        }else {
-          return null;
+
+            $fields = 'et_question.*, IFNULL(COUNT(cs_correct),0) tries, IFNULL(SUM(cs_correct),0) correct_tries';
+            $tables = array('et_question', 'et_choice_stats', 'et_question_test');
+            $where = array();
+            $options = array('GROUP BY' => 'qn_hash', 'ORDER BY' => 'qt_num');
+            $joins = array(
+                'et_choice_stats' => array('LEFT JOIN', array('cs_question_hash=qn_hash')),
+                'et_question_test' => array('INNER JOIN', array('qt_question_hash=qn_hash', 'qt_test_id' => $id)),
+            );
+
+            if ($variant) {
+                /* Select questions with known hashes for loading a specific variant.
+                   This is needed because quiz set of questions can change over time,
+                   but we want to always display the known variant. */
+                $where['qn_hash'] = $qhashes;
+                $joins['et_question_test'][0] = 'LEFT JOIN';
+            }
+
+            /* Read questions: */
+            $result = $dbr->select($tables, $fields, $where, __METHOD__, $options, $joins);
+            if ($dbr->numRows($result) <= 0)
+                return null;
+
+            $rows = array();
+            while ($question = $dbr->fetchObject($result)) {
+                $question = (array)$question;
+                if (!$question['correct_tries'])
+                    $question['correct_tries'] = 0;
+                if (!$question['tries'])
+                    $question['tries'] = 0;
+
+                if (!$variant && $test['test_autofilter_min_tries'] > 0 &&
+                    $question['tries'] >= $test['test_autofilter_min_tries'] &&
+                    $question['correct_tries'] / $question['tries'] >= $test['test_autofilter_success_percent'] / 100.0
+                ) {
+                    /* Statistics tells us this question is too simple, skip it */
+                    wfDebug(__CLASS__ . ': Skipping ' . $question['qn_hash'] . ', because correct percent = ' . $question['correct_tries'] . '/' . $question['tries'] . ' >= ' . $test['test_autofilter_success_percent'] . "%\n");
+                    continue;
+                }
+                $question['choices'] = array();
+                $question['correct_count'] = 0;
+                $rows[$question['qn_hash']] = $question;
+            }
+
+            /* Optionally shuffle and limit questions */
+            if (!$variant && ($test['test_shuffle_questions'] || $test['test_limit_questions'])) {
+                $new = $rows;
+                if ($test['test_shuffle_questions'])
+                    shuffle($new);
+                if ($test['test_limit_questions'])
+                    array_splice($new, $test['test_limit_questions']);
+                $rows = array();
+                foreach ($new as $question)
+                    $rows[$question['qn_hash']] = $question;
+            } elseif ($variant) {
+                $new = array();
+                foreach ($variant as $question) {
+                    if ($rows[$question[0]]) {
+                        $rows[$question[0]]['ch_order'] = $question[1];
+                        $new[$question[0]] = &$rows[$question[0]];
+                    }
+                }
+                $rows = $new;
+            }
+
+            /* Read choices: */
+            if ($rows) {
+                $result = $dbr->select(
+                    'et_choice', '*', array('ch_question_hash' => array_keys($rows)),
+                    __METHOD__, array('ORDER BY' => 'ch_question_hash, ch_num')
+                );
+                $question = null;
+                while ($choice = $dbr->fetchObject($result)) {
+                    $choice = (array)$choice;
+                    if (!$question) {
+                        $question = &$rows[$choice['ch_question_hash']];
+                    } elseif ($question['qn_hash'] != $choice['ch_question_hash']) {
+                        if (!self::finalizeQuestionRow($question, $variant && true, $test['test_shuffle_choices'])) {
+                            unset($rows[$question['qn_hash']]);
+                        }
+                        $question = &$rows[$choice['ch_question_hash']];
+                    }
+                    $question['choiceByNum'][$choice['ch_num']] = $choice;
+                    $question['choices'][] = &$question['choiceByNum'][$choice['ch_num']];
+                    if ($choice['ch_correct']) {
+                        $question['correct_count']++;
+                        $question['correct_choices'][] = &$question['choiceByNum'][$choice['ch_num']];
+                    }
+                }
+                if (!self::finalizeQuestionRow($question, $variant && true, $test['test_shuffle_choices']))
+                    unset($rows[$question['qn_hash']]);
+                unset($question);
+                $dbr->freeResult($result);
+            }
+
+            /* Finally, build question array for the test */
+            $test['questions'] = array();
+            foreach ($rows as $question) {
+                $test['questionByHash'][$question['qn_hash']] = $question;
+                $test['questions'][] = &$test['questionByHash'][$question['qn_hash']];
+            }
+
+            // a variant ID is computed using hashes of selected questions and sequences of their answers
+            $variant = array();
+            foreach ($test['questions'] as $question) {
+                $v = array($question['qn_hash']);
+                foreach ($question['choices'] as $c)
+                    $v[1][] = $c['ch_num'];
+                $variant[] = $v;
+            }
+            $test['variant_hash'] = serialize($variant);
+            $test['variant_hash_crc32'] = sprintf("%u", crc32($test['variant_hash']));
+            $test['variant_hash_md5'] = md5($test['variant_hash']);
+
+            $test['random_correct'] = 0;
+            $test['max_score'] = 0;
+            foreach ($test['questions'] as $question) {
+                // correct answers count for random selection
+                $test['random_correct'] += $question['correct_count'] / count($question['choices']);
+                // maximum total score
+                $test['max_score'] += $question['correct_count'] * $question['score_correct'];
+            }
+
+            return $test;
+        } else {
+            return null;
         }
     }
 
@@ -895,33 +895,53 @@ class EasyTestsPage extends SpecialPage
             case 'free-text':
                 if ($inputs) {
                     $html .= wfMsg('easytests-freetext') . ' ' . self::xelement('input', array('name' => "a[$qn_key]", 'type' => 'text'));
-                }else{
-                    $html .= self::xelement('ol', array('class' => 'easytests-choices'), $question['choices'][0]['ch_text']);
+                } else {
+                    $html .= self::xelement('ol', array('class' => 'easytests-choices'), '____________________');
                 }
                 break;
             case 'order':
-                $options = self::buildOptionsArray($question['choices'], $question['qn_type']);
+                $options = self::buildOptionsArray($question['choices'], $question['qn_type'], $inputs);
                 foreach ($question['choices'] as $i => $choice) {
                     $ch_num = $choice['ch_num'];
-                    $h = $choice['ch_text'] . '&nbsp;' . self::xelement('select', array(
-                            'name' => "a[$qn_key][$ch_num]",
-                        ), $options);
+                    if ($inputs) {
+                        $h = $choice['ch_text'] . '&nbsp;' . self::xelement('select', array(
+                                'name' => "a[$qn_key][$ch_num]",
+                            ), $options);
+                        $choices .= self::xelement('li', array('class' => 'easytests-choice'), $h);
+                    } else {
+                        $h = self::xelement('span', array(
+                                'class' => "square",
+                            ), '&nbsp;') . '&nbsp;' . $choice['ch_text'];
+                        $choices .= self::xelement('p', array('class' => 'easytests-choice'), $h);
+                    }
 
-                    $choices .= self::xelement('li', array('class' => 'easytests-choice'), $h);
                 }
-                $html .= self::xelement('ol', array('class' => 'easytests-choices'), $choices);
+                $html .= self::xelement($inputs ? 'ol' : 'div', array('class' => 'easytests-choices'), $choices);
                 break;
             case 'parallel':
-                $options = self::buildOptionsArray($question['choices'], $question['qn_type']);
-                foreach ($question['choices'] as $i => $choice) {
-                    $ch_num = $choice['ch_num'];
-                    $h = $choice['ch_text'] . '&nbsp;' . self::xelement('select', array(
-                            'name' => "a[$qn_key][$ch_num]",
-                        ), $options);
+                $options = self::buildOptionsArray($question['choices'], $question['qn_type'], $inputs);
+                if ($inputs) {
+                    foreach ($question['choices'] as $i => $choice) {
+                        $ch_num = $choice['ch_num'];
+                        $h = $choice['ch_text'] . '&nbsp;' . self::xelement('select', array(
+                                'name' => "a[$qn_key][$ch_num]",
+                            ), $options);
 
-                    $choices .= self::xelement('li', array('class' => 'easytests-choice'), $h);
+                        $choices .= self::xelement('li', array('class' => 'easytests-choice'), $h);
+                    }
+                } else {
+                    $print_options = '<div class="print-mode-list">' . self::xelement('ol', array(
+                            'class' => 'easytests-choices'
+                        ), $options) . '</div>';
+                    foreach ($question['choices'] as $i => $choice) {
+                        $h = $choice['ch_text'] . '&nbsp;' . self::xelement('span', array(
+                                'class' => "square"
+                            ), '&nbsp;');
+                        $choices .= self::xelement('li', array('class' => 'easytests-choice'), $h);
+                    }
+                    $print_qn = '<div>'.self::xelement('ol', array('class' => 'easytests-choices'), $choices).'</div>';
                 }
-                $html .= self::xelement('ol', array('class' => 'easytests-choices'), $choices);
+                $html .= '<div class="easytest-parallel-wrapper">' . $print_qn . $print_options . '</div>';
                 break;
             default:
                 foreach ($question['choices'] as $i => $choice) {
@@ -964,31 +984,41 @@ class EasyTestsPage extends SpecialPage
      * @param $question_type
      * @return string
      */
-    private static function buildOptionsArray($choices, $question_type)
+    private static function buildOptionsArray($choices, $question_type, $inputs = true)
     {
         $options_arr = '';
         switch ($question_type) {
             case 'order' :
                 foreach ($choices as $key => $value) {
-                    $options_arr .= Xml::element('option', array(
-                        'value' => $key,
-                    ), $key + 1);
+                    if ($inputs) {
+                        $options_arr .= Xml::element('option', array(
+                            'value' => $key,
+                        ), $key + 1);
+                    }
                 }
                 break;
             case 'parallel' :
-                usort($choices, function ($a, $b) {
-                    if (intval($a['ch_num']) > intval($b['ch_num'])) {
-                        return 1;
-                    } elseif (intval($a['ch_num']) < intval($b['ch_num'])) {
-                        return -1;
-                    } else {
-                        return 0;
-                    }
-                });
+                if ($inputs) {
+                    usort($choices, function ($a, $b) {
+                        if (intval($a['ch_num']) > intval($b['ch_num'])) {
+                            return 1;
+                        } elseif (intval($a['ch_num']) < intval($b['ch_num'])) {
+                            return -1;
+                        } else {
+                            return 0;
+                        }
+                    });
+                } else {
+                    shuffle($choices);
+                }
                 foreach ($choices as $key => $value) {
-                    $options_arr .= Xml::element('option', array(
-                        'value' => $value['ch_parallel'],
-                    ), $value['ch_parallel']);
+                    if ($inputs) {
+                        $options_arr .= Xml::element('option', array(
+                            'value' => $value['ch_parallel'],
+                        ), $value['ch_parallel']);
+                    } else {
+                        $options_arr .= Xml::element('li', null, $value['ch_parallel']);
+                    }
                 }
                 break;
         }
@@ -1131,6 +1161,11 @@ EOT;
                             // one correct answer
                             $is_correct = $question['choices'][$user_answers - 1]['ch_correct'] ? 1 : 0;
                             $num = $question['choices'][$user_answers - 1]['ch_num'];
+                            $user_answer_stats[] = array(
+                                'ch_numb' => $num,
+                                'correct' => $is_correct
+                            );
+                            $text = serialize($user_answer_stats);
                         }
                         break;
                 }
@@ -1326,37 +1361,37 @@ EOT;
     {
         $items = array();
         $html = '';
-        foreach ($test['questions'] as $k => $q) {
-            $row = @$testresult['answers'][$q['qn_hash']];
+        foreach ($test['questions'] as $key => $question) {
+            $row = @$testresult['answers'][$question['qn_hash']];
             if ($row && $row['cs_correct']) {
                 continue;
             }
-            $items[$k] = true;
-            $correct = $q['correct_choices'][0];
+            $items[$key] = true;
+            $correct = self::buildCorrectAnswers($question['correct_choices'], $question['qn_type']);
             $html .= Xml::element('hr');
-            $html .= self::xelement('a', array('name' => "q$k"), '', false);
+            $html .= self::xelement('a', array('name' => "q$key"), '', false);
             if ($is_adm) {
-                $stats = self::questionStatsHtml($q['correct_tries'], $q['tries']);
+                $stats = self::questionStatsHtml($question['correct_tries'], $question['tries']);
             } else {
                 $stats = '';
             }
-            $html .= self::xelement('h3', NULL, wfMsg('easytests-question', $k + 1) . $stats);
-            //$html .= self::xelement('div', array('class' => 'easytests-question'), $q['qn_text']);
-            $html .= self::getQuestionHtml($q, $k);
+            $html .= self::xelement('h3', NULL, wfMsg('easytests-question', $key + 1) . $stats);
+//            $html .= self::xelement('div', array('class' => 'easytests-question'), $question['qn_text']);
+            $html .= self::getQuestionHtml($question, $key);
             if ($row) {
                 $html .= self::xelement('h4', NULL, wfMsg('easytests-your-answer'));
-                if($row['cs_text']) {
+                if ($row['cs_text']) {
                     $answ = self::htmlShowAnswers($row['cs_text'], $test['questionByHash'][$row['cs_question_hash']]);
-                }else {
-                    $answ = !empty($row['cs_choice_num']) ? $q['choiceByNum'][$row['cs_choice_num']]['ch_text'] : $row['cs_text'];
+                } else {
+                    $answ = !empty($row['cs_choice_num']) ? $question['choiceByNum'][$row['cs_choice_num']]['ch_text'] : $row['cs_text'];
                 }
                 $html .= self::xelement('div', array('class' => 'easytests-your-answer'), $answ);
             }
             $html .= self::xelement('h4', NULL, wfMsg('easytests-right-answer'));
-            $html .= self::xelement('div', array('class' => 'easytests-right-answer'), $correct['ch_text']);
-            if ($q['qn_explanation']) {
+            $html .= self::xelement('div', array('class' => 'easytests-right-answer'), $correct);
+            if ($question['qn_explanation']) {
                 $html .= self::xelement('h4', NULL, wfMsg('easytests-explanation'));
-                $html .= self::xelement('div', array('class' => 'easytests-explanation'), $q['qn_explanation']);
+                $html .= self::xelement('div', array('class' => 'easytests-explanation'), $question['qn_explanation']);
             }
         }
         if ($items) {
@@ -1366,27 +1401,62 @@ EOT;
         }
         return $html;
     }
-  
-  /**
-   * @param string $row_text
-   * @param        $question
-   *
-   * @return string
-   */
-    private static function htmlShowAnswers($row_text = '', $question){
+
+    private static function buildCorrectAnswers($correct_choices, $qn_type)
+    {
+        $corrects = '';
+        switch ($qn_type) {
+            case 'parallel':
+                foreach ($correct_choices as $key => $choice) {
+                    $corrects .= Xml::element('p', null, $choice['ch_text'] . ' - ' . $choice['ch_parallel']);
+                }
+                break;
+            case 'order':
+                foreach ($correct_choices as $key => $choice) {
+                    $corrects .= Xml::element('p', null, $choice['ch_order_index'] + 1 . ' - ' . $choice['ch_text']);
+                }
+                break;
+            default:
+                foreach ($correct_choices as $key => $choice) {
+                    $corrects .= Xml::element('p', null, $choice['ch_text']);
+                }
+                break;
+        }
+        return $corrects;
+    }
+
+    /**
+     * @param string $row_text
+     * @param        $question
+     *
+     * @return string
+     */
+    private static function htmlShowAnswers($row_text = '', $question)
+    {
         $answers = unserialize($row_text);
         $user_answers = '';
-        usort($answers,function ($a, $b){
-            if($a['ch_numb'] > $b['ch_numb'])
+        usort($answers, function ($a, $b) {
+            if ($a['ch_numb'] > $b['ch_numb'])
                 return 1;
             elseif ($a['ch_numb'] < $b['ch_numb'])
                 return -1;
             else return 0;
         });
-        //TODO: fix error
-        foreach ($answers as $key => $answer) {
-            $user_answers .= Xml::element('p',null,  $question['choiceByNum'][$answer['ch_numb']]['ch_text'] . '-' . $answer['user_answ']);
+
+        if ($question['qn_type'] == 'simple') {
+            foreach ($answers as $key => $answer) {
+                $user_answers .= Xml::element('p', null, $question['choiceByNum'][$answer['ch_numb']]['ch_text']);
+            }
+        } elseif ($question['qn_type'] == 'free-text') {
+            foreach ($answers as $key => $answer) {
+                $user_answers .= Xml::element('p', null, $answer['user_answ']);
+            }
+        } else {
+            foreach ($answers as $key => $answer) {
+                $user_answers .= Xml::element('p', null, $question['choiceByNum'][$answer['ch_numb']]['ch_text'] . ' - ' . $answer['user_answ']);
+            }
         }
+
         return $user_answers;
     }
 
