@@ -910,13 +910,13 @@ class EasyTestsPage extends SpecialPage
                         $choices .= self::xelement('li', array('class' => 'easytests-choice'), $h);
                     } else {
                         $h = self::xelement('span', array(
-                                'class' => "square",
-                            ), '&nbsp;') . '&nbsp;' . $choice['ch_text'];
-                        $choices .= self::xelement('p', array('class' => 'easytests-choice'), $h);
+                                'class' => 'fs20 lh14',
+                            ), '&#9633;') . '&nbsp;' . $choice['ch_text'];
+                        $choices .= self::xelement('li', array('class' => 'easytests-choice'), $h);
                     }
 
                 }
-                $html .= self::xelement($inputs ? 'ol' : 'div', array('class' => 'easytests-choices'), $choices);
+                $html .= self::xelement('ol', $inputs ? array('class' => 'easytests-choices') : array('class' => 'easytests-choices no-style'), $choices);
                 break;
             case 'parallel':
                 $options = self::buildOptionsArray($question['choices'], $question['qn_type'], $inputs);
@@ -936,8 +936,8 @@ class EasyTestsPage extends SpecialPage
                         ), $options) . '</div>';
                     foreach ($question['choices'] as $i => $choice) {
                         $h = $choice['ch_text'] . '&nbsp;' . self::xelement('span', array(
-                                'class' => "square"
-                            ), '&nbsp;');
+                                'class' => 'fs20 lh14',
+                            ), '&#9633;');
                         $choices .= self::xelement('li', array('class' => 'easytests-choice'), $h);
                     }
                     $print_qn = '<div>' . self::xelement('ol', array('class' => 'easytests-choices'), $choices) . '</div>';
@@ -1415,7 +1415,7 @@ EOT;
                 break;
             case 'order':
                 foreach ($correct_choices as $key => $choice) {
-                    $corrects .= Xml::element('p', null, $choice['ch_order_index'] + 1 . ' - ' . $choice['ch_text']);
+                    $corrects .= Xml::element('p', null, $choice['ch_text'] . ' - ' . ($choice['ch_order_index'] + 1));
                 }
                 break;
             default:
@@ -1455,7 +1455,7 @@ EOT;
             }
         } else {
             foreach ($answers as $key => $answer) {
-                $user_answers .= Xml::element('p', null, $question['choiceByNum'][$answer['ch_numb']]['ch_text'] . ' - ' . $answer['user_answ']);
+                $user_answers .= Xml::element('p', null, $question['choiceByNum'][$answer['ch_numb']]['ch_text'] . ' - ' . ($question['qn_type'] == 'parallel' ? $answer['user_answ'] : $answer['user_answ'] + 1));
             }
         }
 
@@ -1834,7 +1834,7 @@ EOT;
             $html .= $ti;
             $html .= self::getCheckList($test, $args, true);
         }
-
+        $html = self::xelement('div', array('class' => 'm20'), $html);
         $wgOut->setPageTitle(wfMsg('easytests-print-pagetitle', $test['test_name']));
         $wgOut->addHTML($html);
     }
@@ -1853,24 +1853,37 @@ EOT;
             $table .= self::xelement('th', NULL, wfMsg('easytests-table-label'));
         } else
             $table .= self::xelement('th', NULL, wfMsg('easytests-table-remark'));
-        foreach ($test['questions'] as $k => $q) {
+        foreach ($test['questions'] as $k => $question) {
             $row = '<td>' . ($k + 1) . '</td>';
             if ($checklist) {
-                /* build a list of correct choice indexes in the shuffled array (or texts for free-text questions) */
-                $correct_indexes = array();
-                foreach ($q['correct_choices'] as $c) {
-                    $correct_indexes[] = $q['correct_count'] < count($q['choices']) ? $c['index'] : $c['ch_text'];
+                // build a list of correct choices or texts for free-text questions
+                $correct_indexes = '';
+                foreach ($question['correct_choices'] as $choice) {
+                    switch ($question['qn_type']) {
+                        case 'parallel':
+                            $correct_indexes .= Xml::element('li', null, $choice['ch_text'] . ' => ' . $choice['ch_parallel']);
+                            break;
+                        case 'order':
+                            $correct_indexes .= Xml::element('li', null, $choice['index'] . '. ' . $choice['ch_text']);
+                            break;
+                        default:
+                            $correct_indexes .= Xml::element('li', null, $question['correct_count'] < count($question['choices']) ? $choice['index'] . ' ' . $choice['ch_text'] : $choice['ch_text']);
+                    }
                 }
-                $row .= '<td>' . htmlspecialchars(implode(', ', $correct_indexes)) . '</td>';
-                if ($q['tries']) {
-                    $row .= '<td>' . $q['correct_tries'] . '/' . $q['tries'] .
-                        ' ≈ ' . round($q['correct_tries'] * 100.0 / $q['tries']) . '%</td>';
-                } else
+
+                $correct_indexes = self::xelement('ul', array('class' => 'no-style'), $correct_indexes);
+
+                $row .= '<td>' . $correct_indexes . '</td>';
+                if ($question['tries']) {
+                    $row .= '<td>' . $question['correct_tries'] . '/' . $question['tries'] .
+                        ' ≈ ' . round($question['correct_tries'] * 100.0 / $question['tries']) . '%</td>';
+                } else {
                     $row .= '<td></td>';
-                $row .= '<td>' . $q['qn_label'] . '</td>';
-            } elseif ($answers && !empty($answers[$q['qn_hash']])) {
-                $ans = $answers[$q['qn_hash']];
-                $ch = !empty($ans['cs_choice_num']) ? $q['choiceByNum'][$ans['cs_choice_num']] : NULL;
+                }
+                $row .= '<td>' . $question['qn_label'] . '</td>';
+            } elseif ($answers && !empty($answers[$question['qn_hash']])) {
+                $ans = $answers[$question['qn_hash']];
+                $ch = !empty($ans['cs_choice_num']) ? $question['choiceByNum'][$ans['cs_choice_num']] : NULL;
                 $row .= '<td>' . ($ch ? $ch['index'] : $ans['cs_text']) . '</td><td' . ($ans['cs_correct'] ? '' : ' class="easytests-fail-bd"') . '>' .
                     wfMsg('easytests-is-' . ($ans['cs_correct'] ? 'correct' : 'incorrect')) . '</td>';
             } else
