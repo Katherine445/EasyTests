@@ -147,7 +147,7 @@
     font-size: 20px;
 }
 
-.no-style {
+.no-ls {
     list-style: none;
 }
 
@@ -156,4 +156,20 @@
 }
 .m20{
     margin: 20px;
+}
+.alpha-style {
+    list-style-type: upper-alpha;
+}
+.border-collapse{
+    border-collapse: collapse;
+}
+.tdWH25 {
+    td{
+        width: 18px;
+        height: 18px;
+    }
+}
+.no-mp{
+    margin: 0;
+    padding: 0;
 }

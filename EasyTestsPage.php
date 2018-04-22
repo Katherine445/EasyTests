@@ -8,7 +8,7 @@ class EasyTestsPage extends SpecialPage
      *
      */
     const DEFAULT_OK_PERCENT = 80;
-
+    const ENG_LI_MARKERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
     /**
      * @var array
      */
@@ -400,6 +400,38 @@ class EasyTestsPage extends SpecialPage
             $stat = wfMsg('easytests-no-complete-stats');
         $stat = '<span class="editsection"' . $style . '>' . $stat . '</span>';
         return $stat;
+    }
+
+    private static function buildParallelAnswerSheet($question)
+    {
+        $ch = '';
+        $tr = '';
+        $i = 0;
+        $square = self::xelement('span', array(
+            'class' => 'fs20 lh14',
+        ), '&#9633;');
+        $letters = str_split(self::ENG_LI_MARKERS);
+        $choices = $question['choices'];
+        do {
+            if( $i == 0){
+                $td = '<td></td>';
+                foreach ($choices as $k => $choice) {
+                    $td .= self::xelement('td', null, $letters[$k]);
+                }
+            }else {
+                $td = '<td>'.$i.'</td>';
+                foreach ($choices as $k => $choice) {
+                    $td .= self::xelement('td', null, ' ');
+                }
+            }
+            $tr .= self::xelement('tr', null, $td);
+            ++$i;
+        } while ($i <= count($choices));
+
+
+        $ch = self::xelement('table', array('class' => 'border-collapse tdWH25',
+            'align' => 'center'), $tr);
+        return $ch;
     }
 
     /** SPECIAL PAGE ENTRY POINT */
@@ -916,7 +948,7 @@ class EasyTestsPage extends SpecialPage
                     }
 
                 }
-                $html .= self::xelement('ol', $inputs ? array('class' => 'easytests-choices') : array('class' => 'easytests-choices no-style'), $choices);
+                $html .= self::xelement('ol', $inputs ? array('class' => 'easytests-choices') : array('class' => 'easytests-choices alpha-style'), $choices);
                 break;
             case 'parallel':
                 $options = self::buildOptionsArray($question['choices'], $question['qn_type'], $inputs);
@@ -1842,7 +1874,13 @@ EOT;
     /**
      * Display a table with question numbers, correct answers, statistics and labels when $checklist is TRUE
      * Display a table with question numbers and two blank columns - "answer" and "remark" when $checklist is FALSE
-     * Display a table with question numbers and user answers when $answers is specified */
+     * Display a table with question numbers and user answers when $answers is specified
+     * @param $test
+     * @param $args
+     * @param bool $checklist
+     * @param null $answers
+     * @return string
+     */
     static function getCheckList($test, $args, $checklist = false, $answers = NULL)
     {
         $table = '';
@@ -1851,8 +1889,9 @@ EOT;
         if ($checklist) {
             $table .= self::xelement('th', NULL, wfMsg('easytests-table-stats'));
             $table .= self::xelement('th', NULL, wfMsg('easytests-table-label'));
-        } else
+        } else {
             $table .= self::xelement('th', NULL, wfMsg('easytests-table-remark'));
+        }
         foreach ($test['questions'] as $k => $question) {
             $row = '<td>' . ($k + 1) . '</td>';
             if ($checklist) {
@@ -1861,17 +1900,17 @@ EOT;
                 foreach ($question['correct_choices'] as $choice) {
                     switch ($question['qn_type']) {
                         case 'parallel':
-                            $correct_indexes .= Xml::element('li', null, $choice['ch_text'] . ' => ' . $choice['ch_parallel']);
+                            $correct_indexes .= Xml::element('li', null, $choice['index'] . '. ' . $choice['ch_text'] . ' => ' . $choice['ch_parallel']);
                             break;
                         case 'order':
-                            $correct_indexes .= Xml::element('li', null, $choice['index'] . '. ' . $choice['ch_text']);
+                            $correct_indexes .= Xml::element('li', null, $choice['ch_order_index'] + 1 . '. ' . str_split(self::ENG_LI_MARKERS)[$choice['index'] - 1] . '. ' . $choice['ch_text']);
                             break;
                         default:
-                            $correct_indexes .= Xml::element('li', null, $question['correct_count'] < count($question['choices']) ? $choice['index'] . ' ' . $choice['ch_text'] : $choice['ch_text']);
+                            $correct_indexes .= Xml::element('li', null, $question['correct_count'] < count($question['choices']) ? $choice['index'] . '. ' . $choice['ch_text'] : $choice['ch_text']);
                     }
                 }
 
-                $correct_indexes = self::xelement('ul', array('class' => 'no-style'), $correct_indexes);
+                $correct_indexes = self::xelement('ul', array('class' => 'no-ls'), $correct_indexes);
 
                 $row .= '<td>' . $correct_indexes . '</td>';
                 if ($question['tries']) {
@@ -1886,8 +1925,26 @@ EOT;
                 $ch = !empty($ans['cs_choice_num']) ? $question['choiceByNum'][$ans['cs_choice_num']] : NULL;
                 $row .= '<td>' . ($ch ? $ch['index'] : $ans['cs_text']) . '</td><td' . ($ans['cs_correct'] ? '' : ' class="easytests-fail-bd"') . '>' .
                     wfMsg('easytests-is-' . ($ans['cs_correct'] ? 'correct' : 'incorrect')) . '</td>';
-            } else
-                $row .= '<td></td><td></td>';
+            } else {
+                switch ($question['qn_type']) {
+                    case 'order':
+                        $ch = '';
+                        foreach ($question['choices'] as $key => $choice) {
+                            $ch .= self::xelement('p', array('class' => 'no-mp'),
+                                $key+1 . self::xelement('span', array(
+                                    'class' => 'fs20 lh14',
+                                ), ' &#9633;'));
+                        }
+                        $row .= '<td>' . $ch. '</td><td></td>';
+                        break;
+                    case 'parallel':
+                        $ch = self::buildParallelAnswerSheet($question);
+                        $row .= '<td>' . $ch . '</td><td></td>';
+                        break;
+                    default:
+                        $row .= '<td></td><td></td>';
+                }
+            }
             $table .= '<tr>' . $row . '</tr>';
         }
         $table = self::xelement('table', array('class' => $checklist ? 'easytests-checklist' : 'easytests-questionnaire'), $table);
