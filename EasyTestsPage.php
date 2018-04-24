@@ -1922,7 +1922,10 @@ EOT;
                 $row .= '<td>' . $question['qn_label'] . '</td>';
             } elseif ($answers && !empty($answers[$question['qn_hash']])) {
                 $ans = $answers[$question['qn_hash']];
+//                @TODO: buids user answers table
+                $ans_text = unserialize($ans['cs_text']);
                 $ch = !empty($ans['cs_choice_num']) ? $question['choiceByNum'][$ans['cs_choice_num']] : NULL;
+                
                 $row .= '<td>' . ($ch ? $ch['index'] : $ans['cs_text']) . '</td><td' . ($ans['cs_correct'] ? '' : ' class="easytests-fail-bd"') . '>' .
                     wfMsg('easytests-is-' . ($ans['cs_correct'] ? 'correct' : 'incorrect')) . '</td>';
             } else {

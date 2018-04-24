@@ -28,7 +28,7 @@ $egEasyTestsContLang = false;
 $wgExtensionCredits['specialpage'][] = array(
     'name' => 'EasyTests',
     'author' => 'Katherine Fomenko',
-    'version' => '0.4.0',
+    'version' => '1.0.0',
     'description' => 'Quiz addon for CSPUMediaWiki',
 );
 
