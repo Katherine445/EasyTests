@@ -1,7 +1,7 @@
 # CSPUWikiTests
 Quiz addon for CSPUMediaWiki
 ## Instalation
-- clone or download repo to `extnsions` folder;
+- clone or download repo to `extensions` folder;
 - put some settings in your `LocalSettings.php` file:
     - add following lines:
         `$egMWQuizzerAdmins = array('WikiSysop');
