@@ -1897,7 +1897,17 @@ EOT;
             if ($checklist) {
                 // build a list of correct choices or texts for free-text questions
                 $correct_indexes = '';
-                foreach ($question['correct_choices'] as $choice) {
+                $sorted_choices = $question['correct_choices'];
+                usort($sorted_choices, function ($a, $b){
+                    if($a['index'] > $b['index']){
+                        return 1;
+                    }elseif ($a['index'] < $b['index']) {
+                        return -1;
+                    }else {
+                        return 0;
+                    }
+                });
+                foreach ($sorted_choices as $choice) {
                     switch ($question['qn_type']) {
                         case 'parallel':
                             $correct_indexes .= Xml::element('li', null, $choice['index'] . '. ' . $choice['ch_text'] . ' => ' . $choice['ch_parallel']);
@@ -1921,12 +1931,28 @@ EOT;
                 }
                 $row .= '<td>' . $question['qn_label'] . '</td>';
             } elseif ($answers && !empty($answers[$question['qn_hash']])) {
+                $user_answer = '';
                 $ans = $answers[$question['qn_hash']];
-//                @TODO: buids user answers table
+//                TODO: buids user answers table
                 $ans_text = unserialize($ans['cs_text']);
-                $ch = !empty($ans['cs_choice_num']) ? $question['choiceByNum'][$ans['cs_choice_num']] : NULL;
-                
-                $row .= '<td>' . ($ch ? $ch['index'] : $ans['cs_text']) . '</td><td' . ($ans['cs_correct'] ? '' : ' class="easytests-fail-bd"') . '>' .
+                $corrects = $question['choices'];
+                $answers_array = [];
+                $eng_keys = str_split( self::ENG_LI_MARKERS);
+                foreach ($ans_text as $key => $choice) {
+                    // todo: rebuids this with switch statement
+                    if ($question['qn_type'] == 'parallel') {
+                        $answers_array[] = $key + 1 . '. ' . $corrects[$key]['ch_text'] . ' => ' . $choice['user_answ'];
+                    } elseif ($question['qn_type'] == 'order') {
+                        $answers_array[] = (int)$choice['user_answ'] + 1 . '. ' . $eng_keys[$key] . '. ' . $question['choiceByNum'][(int)$choice['ch_numb']]['ch_text'];
+                    } elseif ($question['qn_type'] == 'free-text') {
+                        $answers_array[] = $choice['user_answ'];
+                    } else {
+                        $uchoice = $question['choiceByNum'][$choice['ch_numb']];
+                        $answers_array[] =  $uchoice['ch_num'] . '. ' . $uchoice['ch_text'];
+                    }
+                }
+                $user_answer = implode('<br>', $answers_array);
+                $row .= '<td>' . $user_answer . '</td><td' . ($ans['cs_correct'] ? '' : ' class="easytests-fail-bd"') . '>' .
                     wfMsg('easytests-is-' . ($ans['cs_correct'] ? 'correct' : 'incorrect')) . '</td>';
             } else {
                 switch ($question['qn_type']) {
