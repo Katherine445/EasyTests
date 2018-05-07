@@ -402,6 +402,29 @@ class EasyTestsPage extends SpecialPage
         return $stat;
     }
 
+    private static function showAnswerMark($answers = [], $question_type = '')
+    {
+        $td = '<td>';
+        $mark = [];
+        $letters = str_split(self::ENG_LI_MARKERS);
+        foreach($answers as $key => $correct) {
+            switch ($question_type) {
+                case 'order':
+                    $mark[] = '<tr>' . self::xelement('td', $correct ? null : array('class' => 'easytests-fail-bd'), $letters[$key] . '. ' . wfMsg('easytests-is-' . ($correct ? 'correct' : 'incorrect'))) . '</tr>';
+                    break;
+                case 'parallel':
+                    $mark[] = '<tr>' . self::xelement('td', $correct ? null : array('class' => 'easytests-fail-bd'), ($key + 1) . '. ' . wfMsg('easytests-is-' . ($correct ? 'correct' : 'incorrect'))) . '</tr>';
+                    break;
+                default:
+                    $mark[] = '<tr>' . self::xelement('td', $correct ? null : array('class' => 'easytests-fail-bd'), wfMsg('easytests-is-' . ($correct ? 'correct' : 'incorrect'))) . '</tr>';
+                    break 2;
+
+            }
+        }
+        $td .= self::xelement('table',array('class' => 'easytests-checklist', 'style' => 'width: 100%;'), implode('', $mark)).'</td>';
+        return $td;
+    }
+
     private static function buildParallelAnswerSheet($question)
     {
         $ch = '';
@@ -1941,19 +1964,25 @@ EOT;
                 foreach ($ans_text as $key => $choice) {
                     // todo: rebuids this with switch statement
                     if ($question['qn_type'] == 'parallel') {
-                        $answers_array[] = $key + 1 . '. ' . $corrects[$key]['ch_text'] . ' => ' . $choice['user_answ'];
+                        $answers_array['answers'][] = $key + 1 . '. ' . $corrects[$key]['ch_text'] . ' => ' . $choice['user_answ'];
+                        $answers_array['correct'][] = $corrects[$key]['ch_parallel'] == $choice['user_answ'] ? true : false;
                     } elseif ($question['qn_type'] == 'order') {
-                        $answers_array[] = (int)$choice['user_answ'] + 1 . '. ' . $eng_keys[$key] . '. ' . $question['choiceByNum'][(int)$choice['ch_numb']]['ch_text'];
+                        $answers_array['answers'][] = (int)$choice['user_answ'] + 1 . '. ' . $eng_keys[$key] . '. ' . $question['choiceByNum'][(int)$choice['ch_numb']]['ch_text'];
+                        $answers_array['correct'][] = (int)$choice['user_answ'] == (int)$corrects[$key]['ch_order_index'] ? true :false;
                     } elseif ($question['qn_type'] == 'free-text') {
-                        $answers_array[] = $choice['user_answ'];
+                        $answers_array['answers'][] = $choice['user_answ'];
+                        $answers_array['correct'][] = $ans['cs_correct'];
                     } else {
                         $uchoice = $question['choiceByNum'][$choice['ch_numb']];
-                        $answers_array[] =  $uchoice['ch_num'] . '. ' . $uchoice['ch_text'];
+                        $answers_array['answers'][] =  $uchoice['ch_num'] . '. ' . $uchoice['ch_text'];
+                        $answers_array['correct'][] = $ans['cs_correct'];
                     }
                 }
-                $user_answer = implode('<br>', $answers_array);
-                $row .= '<td>' . $user_answer . '</td><td' . ($ans['cs_correct'] ? '' : ' class="easytests-fail-bd"') . '>' .
-                    wfMsg('easytests-is-' . ($ans['cs_correct'] ? 'correct' : 'incorrect')) . '</td>';
+                $user_answer = implode('<br>', $answers_array['answers']);
+                $row .= '<td>' . $user_answer . '</td>';
+                $row .= self::showAnswerMark($answers_array['correct'], $question['qn_type']);
+//                $row .= '<td' . ($ans['cs_correct'] ? '' : ' class="easytests-fail-bd"') . '>' .
+//                    wfMsg('easytests-is-' . ($ans['cs_correct'] ? 'correct' : 'incorrect')) . '</td>';
             } else {
                 switch ($question['qn_type']) {
                     case 'order':
