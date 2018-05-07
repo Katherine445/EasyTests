@@ -417,7 +417,7 @@ class EasyTestsPage extends SpecialPage
                     break;
                 default:
                     $mark[] = '<tr>' . self::xelement('td', $correct ? null : array('class' => 'easytests-fail-bd'), wfMsg('easytests-is-' . ($correct ? 'correct' : 'incorrect'))) . '</tr>';
-                    break 2;
+                    break;
 
             }
         }
@@ -1248,27 +1248,38 @@ EOT;
      */
     static function calculateScores(&$testresult, &$test)
     {
-        $correct_score = 0;
         foreach ($testresult['answers'] as $hash => $row) {
+            $correct_score = 0;
+            $question = $test['questionByHash'][$hash];
+            $has_incorrect = false;
             if ($row['cs_text']) {
                 $answers_stats = unserialize($row['cs_text']);
                 foreach ($answers_stats as $key => $answer_stats) {
-                    $correct_score += $answer_stats['correct'] ? $test['questionByHash'][$hash]['score_correct'] : 0;
+                    $correct_score += $answer_stats['correct'] ? $question['score_correct'] : 0;
+                    if($question['qn_type'] == 'simple' and !$has_incorrect) {
+                        $has_incorrect += $answer_stats['correct'] ? false : true;
+                    }
                 }
                 $testresult['correct_count'] += $correct_score > 0 ? 1 : 0;
-                $testresult['score'] += $correct_score > 0 ? $correct_score : $test['questionByHash'][$hash]['score_incorrect'];
+                $testresult['score'] += ($correct_score > 0 and !$has_incorrect) ? $correct_score : 0;
             } else {
                 $c = $row['cs_correct'] ? 1 : 0;
                 $testresult['correct_count'] += $c;
-                $testresult['score'] += $test['questionByHash'][$hash][$c ? 'score_correct' : 'score_incorrect'];
+                $testresult['score'] += $c ? $question['score_correct'] : 0;
             }
         }
         $testresult['correct_percent'] = round($testresult['correct_count'] / count($test['questions']) * 100, 1);
-        $testresult['score_percent'] = round($testresult['score'] / $test['max_score'] * 100, 1);
+        $testresult['score_percent'] = round(($testresult['score'] / $test['max_score']) * 100, 1);
         $testresult['passed'] = $testresult['score_percent'] >= $test['test_ok_percent'];
     }
 
-    /** Send emails with test results to administrators */
+    /** Send emails with test results to administrators
+     * @param $ticket
+     * @param $test
+     * @param $testresult
+     * @throws Exception
+     * @throws MWException
+     */
     static function sendMail($ticket, $test, $testresult)
     {
         global $egEasyTestsAdmins, $wgEmergencyContact;
@@ -1971,20 +1982,18 @@ EOT;
                             break;
                         case 'free-text':
                             $answers_array['answers'][] = $choice['user_answ'];
-                            $answers_array['correct'][] = $ans['cs_correct'];
+                            $answers_array['correct'][] = $choice['correct'];
                             break;
                         default:
                             $uchoice = $question['choiceByNum'][$choice['ch_numb']];
                             $answers_array['answers'][] =  $uchoice['ch_num'] . '. ' . $uchoice['ch_text'];
-                            $answers_array['correct'][] = $ans['cs_correct'];
+                            $answers_array['correct'][] = $choice['correct'];
 
                     }
                 }
                 $user_answer = implode('<br>', $answers_array['answers']);
                 $row .= '<td>' . $user_answer . '</td>';
                 $row .= self::showAnswerMark($answers_array['correct'], $question['qn_type']);
-//                $row .= '<td' . ($ans['cs_correct'] ? '' : ' class="easytests-fail-bd"') . '>' .
-//                    wfMsg('easytests-is-' . ($ans['cs_correct'] ? 'correct' : 'incorrect')) . '</td>';
             } else {
                 switch ($question['qn_type']) {
                     case 'order':
