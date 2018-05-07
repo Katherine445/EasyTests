@@ -93,10 +93,10 @@ class EasyTests
             die("Please add the following line:\nEasyTests::setupNamespace(XXX);\nto your LocalSettings.php, where XXX is an available integer index for Quiz namespace");
         global $wgExtraNamespaces, $wgCanonicalNamespaceNames, $wgNamespaceAliases, $wgParser;
         global $wgVersion, $wgHooks;
-        $wgExtraNamespaces[NS_EATEST] = $wgCanonicalNamespaceNames[NS_EATEST] = 'Quiz';
-        $wgExtraNamespaces[NS_EATEST_TALK] = $wgCanonicalNamespaceNames[NS_EATEST_TALK] = 'Quiz_talk';
-        $wgNamespaceAliases['Quiz'] = NS_EATEST;
-        $wgNamespaceAliases['Quiz_talk'] = NS_EATEST_TALK;
+        $wgExtraNamespaces[NS_EATEST] = $wgCanonicalNamespaceNames[NS_EATEST] = 'ETest';
+        $wgExtraNamespaces[NS_EATEST_TALK] = $wgCanonicalNamespaceNames[NS_EATEST_TALK] = 'ETest_talk';
+        $wgNamespaceAliases['ETest'] = NS_EATEST;
+        $wgNamespaceAliases['ETest_talk'] = NS_EATEST_TALK;
         if ($wgVersion < '1.14')
             $wgHooks['NewRevisionFromEditComplete'][] = 'EasyTests::NewRevisionFromEditComplete';
         else

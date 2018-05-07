@@ -467,7 +467,7 @@ class EasyTestsPage extends SpecialPage
         $mode = isset($args['mode']) ? $args['mode'] : '';
 
         // Do not create Title from name because it will lead to permission errors
-        // for unauthorized users in case of IntraACL Quiz: namespace protection
+        // for unauthorized users in case of IntraACL ETest: namespace protection
         $id = false;
         if ($par)
             $id = array('name' => $par);
@@ -1598,7 +1598,7 @@ EOT;
                 'perpage' => '',
                 'page' => '',
             );
-        if (isset($args['quiz_name']) && ($t = Title::newFromText('Quiz:' . $args['quiz_name']))) {
+        if (isset($args['quiz_name']) && ($t = Title::newFromText('ETest:' . $args['quiz_name']))) {
             $where['test_page_title'] = $t->getText();
             $info['quiz_name'] = $t->getText();
         }
@@ -1734,7 +1734,7 @@ EOT;
             if ($t['test_id']) {
                 $name = $t['test_page_title'];
                 $testtry = $wgTitle->getFullUrl(array('id' => $t['test_id']));
-                $testhref = Title::newFromText('Quiz:' . $t['test_page_title'])->getFullUrl();
+                $testhref = Title::newFromText('ETest:' . $t['test_page_title'])->getFullUrl();
                 $tr[] = self::xelement('a', array('href' => $testhref), $name) . ' (' .
                     self::xelement('a', array('href' => $testtry), wfMsg('easytests-try')) . ')';
                 $tr[] = $t['test_name'] ?: $name;
