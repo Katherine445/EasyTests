@@ -144,7 +144,6 @@ class EasyTestsUpdater
      */
     static function checkLastQuestion(&$questions, &$log)
     {
-        // TODO: save answers order if question type != simple
         $last_question = $questions[count($questions) - 1];
         $incorrect = 0;
         $ok = false;

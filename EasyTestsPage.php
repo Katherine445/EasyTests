@@ -1233,7 +1233,6 @@ EOT;
                     'cs_question_hash' => $question['qn_hash'],
                     'cs_choice_num' => $num,
                     'cs_text' => $text,
-                    // TODO: remove this field from DB
                     'cs_correct' => $is_correct,
                 );
             }
@@ -1956,26 +1955,29 @@ EOT;
             } elseif ($answers && !empty($answers[$question['qn_hash']])) {
                 $user_answer = '';
                 $ans = $answers[$question['qn_hash']];
-//                TODO: buids user answers table
                 $ans_text = unserialize($ans['cs_text']);
                 $corrects = $question['choices'];
                 $answers_array = [];
                 $eng_keys = str_split( self::ENG_LI_MARKERS);
                 foreach ($ans_text as $key => $choice) {
-                    // todo: rebuids this with switch statement
-                    if ($question['qn_type'] == 'parallel') {
-                        $answers_array['answers'][] = $key + 1 . '. ' . $corrects[$key]['ch_text'] . ' => ' . $choice['user_answ'];
-                        $answers_array['correct'][] = $corrects[$key]['ch_parallel'] == $choice['user_answ'] ? true : false;
-                    } elseif ($question['qn_type'] == 'order') {
-                        $answers_array['answers'][] = (int)$choice['user_answ'] + 1 . '. ' . $eng_keys[$key] . '. ' . $question['choiceByNum'][(int)$choice['ch_numb']]['ch_text'];
-                        $answers_array['correct'][] = (int)$choice['user_answ'] == (int)$corrects[$key]['ch_order_index'] ? true :false;
-                    } elseif ($question['qn_type'] == 'free-text') {
-                        $answers_array['answers'][] = $choice['user_answ'];
-                        $answers_array['correct'][] = $ans['cs_correct'];
-                    } else {
-                        $uchoice = $question['choiceByNum'][$choice['ch_numb']];
-                        $answers_array['answers'][] =  $uchoice['ch_num'] . '. ' . $uchoice['ch_text'];
-                        $answers_array['correct'][] = $ans['cs_correct'];
+                    switch ($question['qn_type']) {
+                        case 'parallel' :
+                            $answers_array['answers'][] = $key + 1 . '. ' . $corrects[$key]['ch_text'] . ' => ' . $choice['user_answ'];
+                            $answers_array['correct'][] = $corrects[$key]['ch_parallel'] == $choice['user_answ'] ? true : false;
+                            break;
+                        case 'order':
+                            $answers_array['answers'][] = (int)$choice['user_answ'] + 1 . '. ' . $eng_keys[$key] . '. ' . $question['choiceByNum'][(int)$choice['ch_numb']]['ch_text'];
+                            $answers_array['correct'][] = (int)$choice['user_answ'] == (int)$corrects[$key]['ch_order_index'] ? true :false;
+                            break;
+                        case 'free-text':
+                            $answers_array['answers'][] = $choice['user_answ'];
+                            $answers_array['correct'][] = $ans['cs_correct'];
+                            break;
+                        default:
+                            $uchoice = $question['choiceByNum'][$choice['ch_numb']];
+                            $answers_array['answers'][] =  $uchoice['ch_num'] . '. ' . $uchoice['ch_text'];
+                            $answers_array['correct'][] = $ans['cs_correct'];
+
                     }
                 }
                 $user_answer = implode('<br>', $answers_array['answers']);
