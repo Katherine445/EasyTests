@@ -37,7 +37,7 @@ $wgSpecialPages['EasyTests'] = 'EasyTestsPage';
 $wgAutoloadClasses += array(
     'EasyTestsPage' => $dir . 'EasyTestsPage.php',
     'EasyTestsUpdater' => $dir . 'EasyTestsUpdater.php',
-    'DOMParseUtils' => $dir . '/utilites/DOMParseUtils.php',
+    'DOMParseUtilsUpdated' => $dir . '/utilites/DOMParseUtilsUpdated.php',
 );
 $wgHooks['LoadExtensionSchemaUpdates'][] = 'EasyTests::LoadExtensionSchemaUpdates';
 $wgHooks['ArticleSaveComplete'][] = 'EasyTests::ArticleSaveComplete';

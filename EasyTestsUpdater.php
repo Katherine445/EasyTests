@@ -2,7 +2,7 @@
 
 /**
  * This class is responsible for parsing quiz articles and writing parsed quizzes into DB.
- * It is done using a recursive DOM parser and DOMParseUtils class.
+ * It is done using a recursive DOM parser and DOMParseUtilsUpdated class.
  */
 class EasyTestsUpdater
 {
@@ -133,7 +133,7 @@ class EasyTestsUpdater
     static function textlog($s)
     {
         if (is_object($s))
-            $s = DOMParseUtils::saveChildren($s);
+            $s = DOMParseUtilsUpdated::saveChildren($s);
         return trim(str_replace("\n", " ", strip_tags($s)));
     }
 
@@ -193,7 +193,7 @@ class EasyTestsUpdater
     {
         self::getRegexps();
         $log = '';
-        $document = DOMParseUtils::loadDOM($html);
+        $document = DOMParseUtilsUpdated::loadDOM($html);
 
         /* Stack: [ [ Element, ChildIndex, AlreadyProcessed, AppendStrlen ] , [ ... ] ] */
         $stack = array(array($document->documentElement, 0, false, 0));
@@ -254,7 +254,7 @@ class EasyTestsUpdater
                         $log_el = $log_el . self::textlog($element) . $log_el;
 
                         /* Match question/parameter section title */
-                        $chk = DOMParseUtils::checkNode($element, self::$regexp_test, true);
+                        $chk = DOMParseUtilsUpdated::checkNode($element, self::$regexp_test, true);
                         if ($chk) {
                             if ($chk[1][1][0]) {
                                 if ($q) {
@@ -280,7 +280,7 @@ class EasyTestsUpdater
                                 }
                                 // define question default array
                                 $q[] = array(
-                                    'qn_label' => DOMParseUtils::saveChildren($chk[0], true),
+                                    'qn_label' => DOMParseUtilsUpdated::saveChildren($chk[0], true),
                                     'qn_anchor' => $anch,
                                     'qn_editsection' => $editsection,
                                     'qn_type' => $question_type ? $question_type : 'simple'
@@ -292,7 +292,7 @@ class EasyTestsUpdater
                                 $log .= "[WARN] Field section must come before questions: $log_el\n";
                             }
                         } elseif ($st == self::ST_QUESTION || $st == self::ST_CHOICE || $st == self::ST_CHOICES) {
-                            $chk = DOMParseUtils::checkNode($element, self::$regexp_question, true);
+                            $chk = DOMParseUtilsUpdated::checkNode($element, self::$regexp_question, true);
                             if ($chk) {
                                 /* Question sub-section */
                                 $sid = '';
@@ -343,8 +343,8 @@ class EasyTestsUpdater
                         }
                     } /* <dt> for a parameter */
                     elseif (($st == self::ST_OUTER || $st == self::ST_PARAM_DD) && $element->nodeName == 'dt') {
-                        $chk = DOMParseUtils::checkNode($element, self::$regexp_test_nq, true);
-                        $log_el = '; ' . trim(strip_tags(DOMParseUtils::saveChildren($element))) . ':';
+                        $chk = DOMParseUtilsUpdated::checkNode($element, self::$regexp_test_nq, true);
+                        $log_el = '; ' . trim(strip_tags(DOMParseUtilsUpdated::saveChildren($element))) . ':';
                         if ($chk) {
                             $field = '';
                             //remove empty elements from array
@@ -369,7 +369,7 @@ class EasyTestsUpdater
                         }
                     } /* Value for quiz parameter $field */
                     elseif ($st == self::ST_PARAM_DD && $element->nodeName == 'dd') {
-                        $value = self::transformFieldValue($field, DOMParseUtils::saveChildren($element));
+                        $value = self::transformFieldValue($field, DOMParseUtilsUpdated::saveChildren($element));
                         $log .= "[INFO] Quiz $field = " . self::textlog($value) . "\n";
                         $quiz["test_$field"] = $value;
                         $st = self::ST_OUTER;
@@ -380,26 +380,26 @@ class EasyTestsUpdater
                         /* <ul>/<ol> with single <li> inside choice */
                         $log .= "[INFO] Stripping single-item list from single-choice section";
                         $element = $element->childNodes->item(0);
-                        $chk = DOMParseUtils::checkNode($element, self::$regexp_correct, true);
+                        $chk = DOMParseUtilsUpdated::checkNode($element, self::$regexp_correct, true);
                         if ($chk) {
                             $element = $chk[0];
                             $n = count($q[count($q) - 1]['choices']);
                             $q[count($q) - 1]['choices'][$n - 1]['ch_correct'] = 1;
                             $log .= "[INFO] Correct choice marker is present in single-item list";
                         }
-                        $append[0] .= trim(DOMParseUtils::saveChildren($element));
+                        $append[0] .= trim(DOMParseUtilsUpdated::saveChildren($element));
                     } elseif ($st == self::ST_CHOICE && $element->nodeName == 'p') {
                         if ($append[0])
                             $append[0] .= '<br />';
-                        $append[0] .= trim(DOMParseUtils::saveChildren($element));
+                        $append[0] .= trim(DOMParseUtilsUpdated::saveChildren($element));
                     } elseif ($st == self::ST_CHOICES && $element->nodeName == 'li') {
-                        $chk = DOMParseUtils::checkNode($element, wfMsgNoTrans('easytests-parse-correct'), true);
+                        $chk = DOMParseUtilsUpdated::checkNode($element, wfMsgNoTrans('easytests-parse-correct'), true);
                         $c = $correct;
                         if ($chk) {
                             $element = $chk[0];
                             $c = 1;
                         }
-                        $children = DOMParseUtils::saveChildren($element);
+                        $children = DOMParseUtilsUpdated::saveChildren($element);
                         $log .= "[INFO] Parsed " . ($c ? "correct " : "") . "choice: " . trim(strip_tags($children)) . "\n";
                         $q[count($q) - 1]['choices'][] = array(
                             'ch_correct' => $c,

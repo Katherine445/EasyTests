@@ -1,6 +1,6 @@
 <?php
 
-class DOMParseUtils
+class DOMParseUtilsUpdated
 {
     const VERSION = '2018-03-24';
 
